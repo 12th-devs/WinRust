@@ -229,9 +229,30 @@ unsafe fn step(h: HWND) {
     }
 }
 
+// The pipe query runs on a worker thread: a service that is slow or stuck must never freeze the card
+// (Windows killed the launcher once for exactly that). Only the newest query's answer is applied.
+const WM_RESULTS: u32 = WM_APP + 8;
+static QUERY_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static ANSWER: std::sync::Mutex<Option<(u64, Vec<String>)>> = std::sync::Mutex::new(None);
+
 unsafe fn refresh(h: HWND) {
+    use std::sync::atomic::Ordering::SeqCst;
     let q = st(|s| String::from_utf16_lossy(&s.text));
-    let res = if q.trim().is_empty() { vec![] } else { ask(&q) };
+    let seq = QUERY_SEQ.fetch_add(1, SeqCst) + 1;
+    if q.trim().is_empty() {
+        return apply_results(h, vec![]);
+    }
+    let hw = h as isize;
+    std::thread::spawn(move || {
+        let res = ask(&q);
+        if QUERY_SEQ.load(SeqCst) == seq {
+            *ANSWER.lock().unwrap() = Some((seq, res));
+            unsafe { PostMessageW(hw as HWND, WM_RESULTS, 0, 0) };
+        }
+    });
+}
+
+unsafe fn apply_results(h: HWND, res: Vec<String>) {
     st(|s| {
         s.results = res;
         s.menu = None;
@@ -306,6 +327,7 @@ unsafe fn backspace(h: HWND, word: bool) {
 }
 
 unsafe fn text_changed(h: HWND) {
+    QUERY_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst); // any answer still in flight is for older text
     if st(|s| s.rename.is_some()) {
         // editing a file name: the results must stay put
     } else if st(|s| s.text.is_empty()) {
@@ -485,6 +507,16 @@ unsafe extern "system" fn wndproc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LR
             match row_at(y) {
                 Some(i) if st(|s| s.rename.is_none() && s.purge.is_none()) => open_menu(h, i, x, y),
                 _ => close_menu(h),
+            }
+            0
+        }
+        WM_RESULTS => {
+            let a = ANSWER.lock().unwrap().take();
+            // drop answers to queries the user has typed past, or that arrive after the card closed
+            if let Some((seq, res)) = a {
+                if seq == QUERY_SEQ.load(std::sync::atomic::Ordering::SeqCst) && st(|s| s.ta > 0.0 && s.rename.is_none()) {
+                    apply_results(h, res);
+                }
             }
             0
         }
