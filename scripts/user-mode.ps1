@@ -25,12 +25,12 @@ if ($Undo) {
 }
 
 $src = @{
-    'rs-shell.exe'      = "$root\plugins\rs-shell\target\release\rs-shell.exe"
-    'rust-explorer.exe' = "$root\plugins\rust-explorer\target\release\rust-explorer.exe"
-    'topbar.exe'        = "$root\plugins\topbar\target\release\topbar.exe"
-    'reshell.exe'       = "$root\ReShell\target\release\reshell.exe"
+    'rs-shell.exe'      = "$root\target\release\rs-shell.exe"
+    'rust-explorer.exe' = "$root\target\release\rust-explorer.exe"
+    'topbar.exe'        = "$root\target\release\topbar.exe"
+    'reshell.exe'       = "$root\target\release\reshell.exe"
 }
-foreach ($k in $src.Keys) { if (-not (Test-Path $src[$k])) { throw "missing $($src[$k]): build it first (cargo build --release in that folder)" } }
+foreach ($k in $src.Keys) { if (-not (Test-Path $src[$k])) { throw "missing $($src[$k]): build it first (scripts\build-plugins.ps1)" } }
 New-Item -ItemType Directory $bin -Force | Out-Null
 foreach ($k in $src.Keys) {
     $to = "$bin\$k"

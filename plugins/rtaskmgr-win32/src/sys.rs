@@ -365,9 +365,9 @@ pub fn process_user(pid: u32) -> Option<String> {
         if OpenProcessToken(h, TOKEN_QUERY, &mut tok) == 0 {
             return None;
         }
-        let mut buf = [0u8; 512];
+        let mut buf = [0u64; 64]; // u64: TOKEN_USER holds pointers, a byte array is not aligned for it
         let mut need = 0u32;
-        let ok = GetTokenInformation(tok, 1 /*TokenUser*/, buf.as_mut_ptr() as *mut _, buf.len() as u32, &mut need) != 0;
+        let ok = GetTokenInformation(tok, 1 /*TokenUser*/, buf.as_mut_ptr() as *mut _, size_of_val(&buf) as u32, &mut need) != 0;
         CloseHandle(tok);
         if !ok {
             return None;

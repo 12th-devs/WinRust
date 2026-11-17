@@ -1,6 +1,6 @@
 #![windows_subsystem = "windows"]
 #[macro_use]
-mod i18n;
+extern crate winrust_common;
 mod app;
 mod data;
 mod draw;

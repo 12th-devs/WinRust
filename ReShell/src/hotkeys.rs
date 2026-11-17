@@ -1,11 +1,14 @@
-//! Replacement for desktop-hotkeys.ps1: Win+1/2/3 -> desktop 1/2/3, Win+` -> previous desktop, Win+E -> our file manager.
+//! Replacement for desktop-hotkeys.ps1: Win+1/2/3 -> desktop 1/2/3, Win+` -> previous desktop, Win+E -> our file manager,
+//! Win+D -> show desktop, Win+I -> Settings. Win+E/D/I are done here, not left to Explorer: with topbar (and rust-explorer)
+//! Explorer's taskbar is hidden or gone and it stops answering them although it still holds the hotkeys.
 //! No undocumented COM: the current desktop comes from the registry, switching sends Ctrl+Win+Left/Right
 //! (Win is already held by the user). shortcut: relies on the system shortcuts being enabled.
-use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering::Relaxed};
-use windows_sys::Win32::{Foundation::*, System::{LibraryLoader::GetModuleHandleW, Registry::*}, UI::{Input::KeyboardAndMouse::*, WindowsAndMessaging::*}};
+use std::sync::atomic::{AtomicIsize, AtomicU32, AtomicUsize, Ordering::Relaxed};
+use windows_sys::Win32::{Foundation::*, System::{Com::{COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx}, LibraryLoader::GetModuleHandleW, Registry::*}, UI::{Input::KeyboardAndMouse::*, Shell::ShellExecuteW, WindowsAndMessaging::*}};
 
 static PREV: AtomicUsize = AtomicUsize::new(usize::MAX);
 static HOOK: AtomicIsize = AtomicIsize::new(0);
+static HELD: AtomicU32 = AtomicU32::new(0); // the Win+letter key still down: auto-repeat must not toggle the desktop again and again
 
 /// (current index, desktop count) from the registry.
 fn desktops() -> Option<(usize, usize)> {
@@ -46,6 +49,25 @@ fn open_files() {
     let _ = Command::new(exe).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
 }
 
+/// Win+I: the Settings app through its protocol (no Explorer needed).
+fn open_settings() {
+    let (verb, uri): (Vec<u16>, Vec<u16>) = ("open\0".encode_utf16().collect(), "ms-settings:\0".encode_utf16().collect());
+    unsafe {
+        CoInitializeEx(std::ptr::null(), (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32); // ShellExecute may activate COM handlers
+        ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), uri.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL);
+    }
+}
+
+/// What Win+<key> does here instead of in Explorer.
+fn win_action(vk: u32) -> Option<fn()> {
+    match vk {
+        0x45 => Some(open_files),                        // E
+        0x44 => Some(winrust_common::desktop::toggle),   // D
+        0x49 => Some(open_settings),                     // I
+        _ => None,
+    }
+}
+
 fn go(target: usize) {
     let Some((cur, count)) = desktops() else { return };
     if target == cur || target >= count { return }
@@ -60,11 +82,14 @@ unsafe extern "system" fn hook(n: i32, w: WPARAM, l: LPARAM) -> LRESULT {
     if n >= 0 {
         let k = unsafe { &*(l as *const KBDLLHOOKSTRUCT) };
         let win = unsafe { (GetAsyncKeyState(VK_LWIN as i32) | GetAsyncKeyState(VK_RWIN as i32)) as u16 & 0x8000 != 0 };
-        if k.vkCode == 0x45 && win && k.flags & LLKHF_INJECTED == 0 {
-            // Win+E: swallow it so Explorer's own handler does not open a window as well
-            if w == WM_KEYDOWN as usize {
+        if (w == WM_KEYUP as usize || w == WM_SYSKEYUP as usize) && HELD.load(Relaxed) == k.vkCode {
+            HELD.store(0, Relaxed); // also when Win was let go first
+        }
+        if let (Some(act), true) = (win_action(k.vkCode), win && k.flags & LLKHF_INJECTED == 0) {
+            // swallow it so Explorer's own handler (if it still answers) does not act as well
+            if w == WM_KEYDOWN as usize && HELD.swap(k.vkCode, Relaxed) != k.vkCode {
                 send(&[tap(0xE8, false), tap(0xE8, true)]); // Win release must not open Start
-                std::thread::spawn(open_files);
+                std::thread::spawn(act);
             }
             return 1;
         }

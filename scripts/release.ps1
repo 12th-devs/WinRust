@@ -1,6 +1,6 @@
 # Publishes a GitHub release with a fresh WinRust.exe.
 #   release.ps1 v0.2.0 [-Notes "text"]
-# Rebuilds everything (build-all.ps1, ends with the stamp check), pushes pending changes, tags, uploads the exe.
+# Rebuilds everything (build-all.ps1), pushes pending changes, tags, uploads the exe.
 param([Parameter(Mandatory)][string]$Version, [string]$Notes)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot

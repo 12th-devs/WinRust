@@ -16,7 +16,8 @@ use std::{
     sync::atomic::{AtomicBool, AtomicIsize, Ordering::Relaxed},
 };
 #[macro_use]
-mod i18n;
+extern crate winrust_common;
+use winrust_common as i18n;
 mod fly;
 use windows::{
     Win32::{
@@ -1683,7 +1684,7 @@ fn wstr_of(w: &[u16]) -> String {
 
 /// "1 окно", "3 окна", "5 окон".
 fn windows_ru(n: usize) -> String {
-    if crate::i18n::english() {
+    if en!() {
         return format!("{n} {}", if n == 1 { "window" } else { "windows" });
     }
     let w = match (n % 10, n % 100) {

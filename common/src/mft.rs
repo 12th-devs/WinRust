@@ -1,4 +1,4 @@
-// NTFS MFT reader shared by rs-du (console) and wiztree (GUI, includes this file by #[path]).
+// NTFS MFT reader shared by rs-du (console) and wiztree (GUI).
 use std::{collections::HashMap, mem::size_of, ptr};
 use windows_sys::Win32::{Foundation::*, Storage::FileSystem::*, System::{IO::DeviceIoControl, Ioctl::*}};
 

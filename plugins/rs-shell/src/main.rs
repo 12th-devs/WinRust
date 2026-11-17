@@ -6,13 +6,13 @@
 // rs-shell --overlay    run NEXT TO explorer.exe (it stays the shell): topbar + desktop + keep the bar alive. Started at logon by the "rs-overlay" scheduled task (HKCU Run as the fallback).
 // Put it next to topbar.exe. Recovery from a black screen: Ctrl+Alt+Del -> Task Manager -> run explorer.exe,
 // then `rs-shell --disable`; or sign in as another admin and run `reg delete` on the key printed by --enable.
-// Also: starts `rust-explorer.exe --desktop` (desktop icons), Win+D = show desktop / bring the windows back,
+// Also: starts `rust-explorer.exe --desktop` (desktop icons), Win+D = show desktop / bring the windows back (winrust-common),
 // Win+E = file manager (rust-explorer.exe if next to us). Put rust-explorer.exe next to rs-shell.exe.
 // shortcuts: Win+D only minimizes ordinary top-level windows (no per-monitor / virtual-desktop logic),
 // Run/Startup entries are started through `cmd /c start` (no RunOnce, no startup-delay rules, no disabled-list in
 // StartupApproved), topbar's "open" still shells out to explorer.exe for /select; upgrade when those matter.
-use std::{os::windows::process::CommandExt, path::PathBuf, process::Command, ptr, sync::Mutex, thread, time::{Duration, Instant}};
-use windows_sys::{core::BOOL, Win32::{Foundation::{HWND, LPARAM, RECT}, Graphics::Dwm::DwmGetWindowAttribute, UI::{Input::KeyboardAndMouse::{MOD_NOREPEAT, MOD_WIN, RegisterHotKey}, WindowsAndMessaging::*}}};
+use std::{os::windows::process::CommandExt, path::PathBuf, process::Command, ptr, thread, time::{Duration, Instant}};
+use windows_sys::{core::BOOL, Win32::{Foundation::{HWND, LPARAM, RECT}, UI::{Input::KeyboardAndMouse::{MOD_NOREPEAT, MOD_WIN, RegisterHotKey}, WindowsAndMessaging::*}}};
 
 const WINLOGON: &str = r"HKCU\Software\Microsoft\Windows NT\CurrentVersion\Winlogon";
 const NO_WINDOW: u32 = 0x0800_0000;
@@ -87,20 +87,6 @@ fn find_exe(name: &str) -> PathBuf {
 
 fn bar_up() -> bool { unsafe { !FindWindowW(wide("topbar").as_ptr(), std::ptr::null()).is_null() } }
 
-static HIDDEN: Mutex<Vec<isize>> = Mutex::new(Vec::new());
-
-unsafe extern "system" fn collect(h: HWND, lp: LPARAM) -> BOOL {
-    unsafe {
-        let mut cloaked = 0u32; // DWMWA_CLOAKED: UWP ghosts that are "visible" but not on screen
-        DwmGetWindowAttribute(h, 14, &mut cloaked as *mut _ as _, 4);
-        let tool = GetWindowLongW(h, GWL_EXSTYLE) as u32 & WS_EX_TOOLWINDOW != 0; // topbar, desktop, tray hosts
-        if IsWindowVisible(h) != 0 && IsIconic(h) == 0 && !tool && cloaked == 0 && GetWindow(h, GW_OWNER).is_null() && GetWindowTextLengthW(h) > 0 {
-            (*(lp as *mut Vec<isize>)).push(h as isize);
-        }
-        1
-    }
-}
-
 /// A minimized window left on screen (or minimized before the hide setting was applied) shows as a caption stub on
 /// the desktop: park it where Windows itself parks hidden minimized windows.
 unsafe extern "system" fn park(h: HWND, _: LPARAM) -> BOOL {
@@ -111,23 +97,6 @@ unsafe extern "system" fn park(h: HWND, _: LPARAM) -> BOOL {
             if r.left > -30000 { SetWindowPos(h, ptr::null_mut(), -32000, -32000, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE); }
         }
         1
-    }
-}
-
-/// Win+D: minimize everything, press again to bring the same windows back. Anything open on screen means "minimize":
-/// after a window was brought back by hand the old list must not turn the next press into a silent "restore".
-fn toggle_desktop() {
-    let mut hid = HIDDEN.lock().unwrap();
-    unsafe {
-        let mut v: Vec<isize> = vec![];
-        EnumWindows(Some(collect), &mut v as *mut _ as LPARAM);
-        if !v.is_empty() {
-            v.iter().for_each(|&h| { ShowWindow(h as HWND, SW_MINIMIZE); });
-            *hid = v;
-        } else {
-            hid.iter().for_each(|&h| { if IsWindow(h as HWND) != 0 { ShowWindow(h as HWND, SW_RESTORE); } });
-            hid.clear();
-        }
     }
 }
 
@@ -198,7 +167,7 @@ fn hotkey_loop() {
         let mut m: MSG = std::mem::zeroed();
         while GetMessageW(&mut m, ptr::null_mut(), 0, 0) > 0 {
             match (m.message == WM_HOTKEY).then_some(m.wParam) {
-                Some(1) => toggle_desktop(),
+                Some(1) => winrust_common::desktop::toggle(),
                 Some(2) => { let fm = dir().join("rust-explorer.exe"); let _ = quiet(if fm.exists() { fm } else { "explorer.exe".into() }).spawn(); }
                 _ => {}
             }
@@ -243,6 +212,10 @@ fn kill_shell_explorer() {
     log(&format!("explorer shell stopped -> {:?}", r.map(|s| s.success())));
 }
 
+/// How long after the overlay starts Explorer may be ended even without the markers below: newer Windows builds (26300)
+/// no longer write them, and the overlay then waited forever. Explorer gets through the autostart well within this.
+const AUTOSTART_GRACE: Duration = Duration::from_secs(90);
+
 /// True once Explorer has started this session's Run keys and Startup folder. The overlay starts at logon (a scheduled task),
 /// before Explorer gets to them: ending Explorer earlier would lose the user's autostart apps.
 fn startup_run() -> bool {
@@ -250,6 +223,10 @@ fn startup_run() -> bool {
     unsafe { windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId(std::process::id(), &mut sid) };
     let k = format!(r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\SessionInfo\{sid}");
     ["RunStuffHasBeenRun", "StartupHasBeenRun"].iter().all(|n| reg(&["query", &format!(r"{k}\{n}")]).is_some())
+}
+
+fn may_end_explorer(markers: bool, since_start: Duration) -> bool {
+    markers || since_start >= AUTOSTART_GRACE
 }
 
 /// Gives the user Explorer back (with a normal, not elevated, token: the shell must never run elevated).
@@ -281,12 +258,17 @@ fn overlay() {
 /// (so the user is never left without a shell) if the bar will not stay up.
 fn overlay_watch(replace: bool, desktop: PathBuf, up: impl Fn() -> bool) {
     let (mut starts, mut misses, mut dmiss, mut stable, mut killed) = (0, 0, 0, 0, false);
+    let began = Instant::now();
     loop {
         thread::sleep(Duration::from_secs(3));
         if replace && !killed {
             // both our surfaces must be on screen before the system's one goes away
             stable = if bar_up() && up() { stable + 1 } else { 0 };
-            if stable >= 3 && startup_run() { kill_shell_explorer(); killed = true; }
+            if stable >= 3 && may_end_explorer(startup_run(), began.elapsed()) {
+                log(&format!("autostart done (markers: {}, after {} s)", startup_run(), began.elapsed().as_secs()));
+                kill_shell_explorer();
+                killed = true;
+            }
         }
         dmiss = if desktop.exists() && !up() { dmiss + 1 } else { 0 };
         if dmiss >= 2 { log(&format!("desktop respawn -> {:?}", quiet(&desktop).arg("--desktop").spawn().map(|_| ()))); dmiss = 0; }
@@ -365,7 +347,14 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{exe_path, parse_run};
+    use super::{exe_path, may_end_explorer, parse_run};
+    use std::time::Duration;
+    #[test]
+    fn ends_explorer_on_markers_or_after_grace() {
+        assert!(may_end_explorer(true, Duration::ZERO));
+        assert!(!may_end_explorer(false, Duration::from_secs(30)));
+        assert!(may_end_explorer(false, Duration::from_secs(90)));
+    }
     #[test]
     fn finds_the_exe_in_run_commands() {
         assert_eq!(exe_path(r#""C:\a b\x.exe" --hidden"#).as_deref(), Some(r"C:\a b\x.exe"));

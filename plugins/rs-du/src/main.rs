@@ -3,10 +3,9 @@
 // rs-du [X:] --clean [--apply [--all|--safe]]   list (or delete: default = green+yellow, --all = everything, --safe = green only)
 // rs-du [X:] --restore | --purge   bring quarantined files back | empty the quarantine now (it also empties itself after 30 days)
 #[macro_use]
-mod i18n;
+extern crate winrust_common;
 mod clean;
-mod mft;
-use mft::*;
+use winrust_common::mft::*;
 // Reads the NTFS MFT (see mft.rs), sums sizes up the parent chain, prints the biggest folders and files. Needs admin (raw volume handle).
 // shortcuts: attribute lists / extension records are ignored (very fragmented files are undercounted),
 // folder index sizes are not counted; upgrade if numbers drift from Explorer.

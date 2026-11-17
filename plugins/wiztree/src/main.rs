@@ -1,11 +1,9 @@
 #![windows_subsystem = "windows"]
-// wiztree [X:]  Disk usage treemap on the NTFS MFT (the same reader as rs-du, shared through mft.rs).
+// wiztree [X:]  Disk usage treemap on the NTFS MFT (the same reader as rs-du, from winrust-common).
 // Click a folder: go in. Right click / Backspace: up. Click a file: show it in Explorer. Tab: next drive. F5: rescan. Esc: quit.
 // Needs admin (raw volume); starts itself elevated (UAC) when it is not.
-// shortcuts: one level of the tree at a time, the 300 biggest items; a folder's own index size is not counted (see mft.rs).
-#[path = "../../rs-du/src/mft.rs"]
-mod mft;
-use mft::*;
+// shortcuts: one level of the tree at a time, the 300 biggest items; a folder's own index size is not counted (see common/src/mft.rs).
+use winrust_common::mft::*;
 use std::{cell::RefCell, collections::HashMap, ptr::{null, null_mut}};
 use windows_sys::Win32::{
     Foundation::*,
