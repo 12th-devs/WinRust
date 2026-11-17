@@ -1,37 +1,40 @@
 # Plugin Launcher: Roadmap
 
-## Сделано
-- Окно на Win32/GDI в стиле rtaskmgr-win32 (тёмная тема, карточки плагинов).
-- Плагины вшиты в один `plugin-launcher.exe` (распаковка в Program Files, не в %TEMP%), статический CRT.
-- **rust-search**: служба поиска по NTFS + Alt+Space; отключает WSearch и строку поиска на панели задач.
-- **rust-search, правый клик по результату**: переименовать (прямо в строке ввода), в корзину, «удалить навсегда + почистить реестр». Удаление идёт в три шага в самой карточке: сканирование (файлы, размер, список записей реестра) → подтверждение (по умолчанию «Cancel») → удаление файлов (снимает read-only, junction/symlink не проходит насквозь); реестр трогается только если все файлы ушли, и сначала сохраняется в `%LOCALAPPDATA%\rs-search\registry-backups\*.reg`. Запись Uninstall/App Paths удаляется целиком, только если сама программа лежала внутри удалённого. Исходники: `rust-search/src/bin/rs-launcher.rs`, `src/regsweep.rs`; проверено тестами и сквозным прогоном в GUI.
-- **rtaskmgr-win32**: заменяет диспетчер задач через IFEO-Debugger (`taskmgr.exe` не трогается). При панике пишет `%APPDATA%\rtaskmgr\crash.log` и открывает настоящий Taskmgr в обход IFEO (запуск под отладкой с мгновенным отсоединением; без прав админа через UAC). Понимает `taskmgr /startup`, есть «Перезапустить от имени администратора». Без предупреждений clippy.
-- **topbar**: нижняя панель (AppBar) в стиле Windows 11 вместо панели задач: логотип (открывает Пуск), кнопки окон с иконками (ЛКМ — свернуть/активировать, ПКМ/СКМ — закрыть), дата и часы. Родную панель скрывает и ставит в автоскрытие; удаление возвращает её (`topbar.exe --restore`). Не запускалась на живой системе, только собрана.
-- **topbar + профиль PowerShell**: при установке topbar в профиль пишется блок между маркерами `# >>> topbar >>>` / `# <<< topbar <<<` (`src/profile.ps1`: zoxide, `grep`=rg, `ll`=eza, `cat`=bat). Пишется в Windows PowerShell 5.1 и в pwsh 7, если он есть; повторная установка не дублирует блок, чужие строки профиля не трогаются, удаление topbar убирает блок (и файл, если в нём больше ничего не было). Проверено на временном профиле; в pwsh и сквозной установкой не проверялось.
-- **Командная строка**: `plugin-launcher list | install <плагин> --yes | uninstall <плагин> | rollback --yes`. Без `--yes` install только печатает предупреждение. Коды выхода 0/1/2. Нужен терминал с правами администратора. Окно и CLI вызывают одни и те же функции. Проверены только команды без изменений системы.
-- **Плагины как данные**: запись в `PLUGINS` включает значок (`glyph`); новый плагин добавляется одной записью, окно и CLI подхватывают её сами.
-- **Страховка topbar**: `reshell` (всегда запущен вместе с панелью) раз в 5 с проверяет, что topbar не работает, а родная панель задач скрыта; два раза подряд (~10 с) — запускает `topbar.exe --restore`. Панель не перезапускает (чтобы не крутиться в цикле при падении на старте). Покрыто unit-тестом условия; сквозной сценарий (убить topbar) не проверялся.
-- **Установщик надёжнее**: сбой установки откатывает изменения (при обновлении уже стоящей копии не откатывает); прежние значения WSearch и строки поиска сохраняются в `HKLM\SOFTWARE\plugin-launcher\rust-search` и возвращаются при удалении; несмертельные ошибки (ярлык, задача планировщика, точка восстановления, профиль) считаются и пишутся в `%ProgramData%\plugin-launcher\install.log`; распаковывается только нужное плагину. Только собрано, не запускалось.
-- **Обновление без пересборки лаунчера**: exe из `payload\` рядом с лаунчером (или `..\..\payload` в cargo-раскладке) берутся с диска вместо вшитых. `plugin-launcher update <плагин>` и `scripts\update-plugin.ps1 <плагин>` (собрать плагин, положить в payload, обновить). Вшитые копии остаются запасными; для релиза по-прежнему `build-all.ps1`.
-- Точка восстановления перед установкой, кнопка «Откатить всё».
-- Исходники всех проектов собраны в `plugins/`.
+(Русская версия: [ROADMAP.ru.md](ROADMAP.ru.md))
 
-## Дальше (по порядку)
-1. **Проверка на чистой Windows 11** (виртуалка): установка, удаление, откат, перезагрузка. Сейчас на другой машине ничего не проверялось.
-3. **chrome-rs**: реальная установка вместо заглушки (после готовности браузера; см. `plugins/chrome-rs/ROADMAP.md`).
-4. **Профиль PowerShell**: по желанию ставить rg/fd/bat/eza/zoxide через winget отдельной галочкой в настройках topbar (сейчас блок молчит, если их нет); проверить запись в pwsh 7 на машине, где он стоит.
-5. **Релизы**: GitHub Releases, SHA-256 рядом, версия в окне, проверка обновлений.
-6. **Подпись кода** (убирает SmartScreen и часть ложных срабатываний антивирусов).
-7. **Win+S / кнопка «Пуск»**: открывать rust-search вместо поиска Windows (рискованно, отдельное решение).
-8. **Не-NTFS диски** в rust-search (сейчас они пропускаются).
-9. Тесты на установочную логику (запуск в песочнице/VM), CI-сборка. Сначала проверить `install`/`uninstall`/`rollback` из CLI на VM: в этой сессии они не запускались.
+## Done
+- A Win32/GDI window in the rtaskmgr-win32 style (dark theme, plugin cards).
+- Plugins embedded into one `plugin-launcher.exe` (unpacked into Program Files, not %TEMP%), static CRT.
+- **rust-search**: an NTFS search service + Alt+Space; disables WSearch and the taskbar search box.
+- **rust-search, right-click on a result**: rename (inline, in the input line), move to recycle bin, "delete permanently + clean the registry". Deletion runs in three steps inside the card: scan (files, size, list of registry entries) → confirmation ("Cancel" by default) → delete files (clears read-only, never follows a junction/symlink); the registry is touched only if every file is gone, and is saved first to `%LOCALAPPDATA%\rs-search\registry-backups\*.reg`. An Uninstall/App Paths entry is removed whole only if the program itself lived inside the deleted folder. Sources: `rust-search/src/bin/rs-launcher.rs`, `src/regsweep.rs`; checked with tests and an end-to-end GUI run.
+- **rtaskmgr-win32**: replaces Task Manager through an IFEO Debugger (`taskmgr.exe` itself is untouched). On a panic it writes `%APPDATA%\rtaskmgr\crash.log` and opens the real Taskmgr bypassing IFEO (started under a debugger that detaches at once; through UAC without admin rights). Understands `taskmgr /startup`, has "Restart as administrator". No clippy warnings.
+- **topbar**: a bottom bar (AppBar) in the Windows 11 style instead of the taskbar: logo (opens Start), window buttons with icons (left click: minimize/activate, right/middle click: close), date and clock. It hides the native taskbar and sets it to auto-hide; uninstall brings it back (`topbar.exe --restore`). Was only built at that point, not run on a live system.
+- **topbar + PowerShell profile**: installing topbar writes a block between the `# >>> topbar >>>` / `# <<< topbar <<<` markers into the profile (`src/profile.ps1`: zoxide, `grep`=rg, `ll`=eza, `cat`=bat). Written to Windows PowerShell 5.1 and to pwsh 7 if present; reinstalling does not duplicate the block, other profile lines are untouched, uninstalling topbar removes the block (and the file if nothing else was in it). Checked on a temporary profile; not checked in pwsh or by an end-to-end install.
+- **Command line**: `plugin-launcher list | install <plugin> --yes | uninstall <plugin> | rollback --yes`. Without `--yes`, install only prints the warning. Exit codes 0/1/2. Needs an administrator terminal. The window and the CLI call the same functions. Only the commands that do not change the system were checked.
+- **Plugins as data**: a `PLUGINS` entry includes the icon (`glyph`); a new plugin is added with one entry, and the window and CLI pick it up on their own.
+- **topbar safety net**: `reshell` (always running with the bar) checks every 5 s that topbar is not running while the native taskbar is hidden; twice in a row (~10 s) it runs `topbar.exe --restore`. It does not restart the bar (to avoid a loop when it crashes on start). Covered by a unit test of the condition; the end-to-end scenario (kill topbar) was not checked.
+- **More robust installer**: a failed install rolls its changes back (not when updating an existing copy); the previous WSearch and search-box values are kept in `HKLM\SOFTWARE\plugin-launcher\rust-search` and restored on uninstall; non-fatal errors (shortcut, scheduled task, restore point, profile) are counted and written to `%ProgramData%\plugin-launcher\install.log`; only what a plugin needs is unpacked. Only built, not run.
+- **Update without rebuilding the launcher**: exes from `payload\` next to the launcher (or `..\..\payload` in the cargo layout) are read from disk instead of the embedded ones. `plugin-launcher update <plugin>` and `scripts\update-plugin.ps1 <plugin>` (build the plugin, put it into payload, update). The embedded copies stay as a fallback; releases still use `build-all.ps1`.
+- A restore point before install, a "Roll everything back" button.
+- Sources of all projects are collected in `plugins/`.
 
-## Известные ограничения
-- Системные компоненты не удаляются, а отключаются или обходятся (обратимо). Полное удаление `taskmgr.exe` и поиска Windows невозможно без взлома защиты системы.
-- Нужны права администратора.
-- Win+S и «Пуск» по-прежнему открывают поиск Windows.
+## Next (in order)
+1. **Test on a clean Windows 11** (VM): install, uninstall, rollback, reboot. Nothing has been checked on another machine so far.
+2. **English UI** for the installer window (the strings are Russian today).
+3. **chrome-rs**: a real install instead of the placeholder (once the browser is ready; see `plugins/chrome-rs/ROADMAP.md`).
+4. **PowerShell profile**: optionally install rg/fd/bat/eza/zoxide through winget with a separate checkbox in the topbar settings (the block is silent without them today); check the pwsh 7 write on a machine that has it.
+5. **Releases**: GitHub Releases (first one is out), SHA-256 next to it, version in the window, update check.
+6. **Code signing** (removes SmartScreen and part of the antivirus false positives).
+7. **Win+S / Start button**: open rust-search instead of Windows Search (risky, a separate decision).
+8. **Non-NTFS drives** in rust-search (skipped today).
+9. Tests for the install logic (sandbox/VM run), CI build. First check `install`/`uninstall`/`rollback` from the CLI on a VM: they were not run in the original session.
 
-- **wiztree / photoview / debloat** (новые, отдельные cargo-проекты; в окне лаунчера wiztree и photoview, debloat только из командной строки: `install debloat --yes`, `uninstall debloat`).
-  - **wiztree**: карта занятого места (treemap) по MFT, окно на GDI; читает MFT тем же кодом, что rs-du (`plugins/rs-du/src/mft.rs`, wiztree подключает его через `#[path]`). Клик по папке: войти, ПКМ/Backspace: вверх, клик по файлу: показать в Проводнике, Tab: следующий диск, F5: заново. Сам перезапускается с UAC. Тест только на раскладку treemap; на живом диске не запускался.
-  - **photoview**: просмотр фото на WIC (jpg/png/bmp/gif/tiff/webp/heic/avif при наличии кодека), поворот по EXIF, листание папки, зум колесом, Del в корзину. Установка добавляет «Открыть с помощью» и запись в «Приложения по умолчанию», значением по умолчанию не становится. Проверено запуском на системной картинке; EXIF-ориентации 5 и 7 не проверялись.
-  - **debloat**: службы (DiagTrack, карты, отчёты об ошибках и т. п.) и политики реестра (Copilot, Recall, реклама, фон Edge). Старое значение каждой правки пишется в `%ProgramData%\winrust-debloat\undo.txt` до изменения, `--undo` возвращает. Сухой прогон (без `--apply`) проверен на живой системе, `--apply`/`--undo` нет.
+## Known limitations
+- System components are not removed but disabled or bypassed (reversibly). Fully deleting `taskmgr.exe` and Windows Search is not possible without breaking system protection.
+- Administrator rights are required.
+- Win+S and Start still open Windows Search.
+
+- **wiztree / photoview / debloat** (new, separate cargo projects; wiztree and photoview are in the launcher window, debloat only from the command line: `install debloat --yes`, `uninstall debloat`).
+  - **wiztree**: a disk-usage treemap from the MFT, a GDI window; reads the MFT with the same code as rs-du (`plugins/rs-du/src/mft.rs`, wiztree pulls it in through `#[path]`). Click a folder: go in, right-click/Backspace: up, click a file: show in Explorer, Tab: next drive, F5: rescan. Restarts itself with UAC. Only the treemap layout is tested; not run on a live disk.
+  - **photoview**: a WIC photo viewer (jpg/png/bmp/gif/tiff/webp/heic/avif if the codec is present), EXIF rotation, folder browsing, wheel zoom, Del to the recycle bin. Install adds "Open with" and an entry in "Default apps"; it does not become the default. Checked by launching on a system image; EXIF orientations 5 and 7 were not checked.
+  - **debloat**: services (DiagTrack, maps, error reporting, etc.) and registry policies (Copilot, Recall, ads, Edge background). The old value of each change is written to `%ProgramData%\winrust-debloat\undo.txt` before the change, `--undo` reverts. The dry run (without `--apply`) was checked on a live system, `--apply`/`--undo` were not.

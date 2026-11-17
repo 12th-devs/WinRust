@@ -2,65 +2,74 @@
 
 # WinRust
 
-**Windows-оболочка на Rust: быстрее и легче стандартной.** Набор небольших нативных программ (без .NET, без Electron), которые заменяют части Windows: панель задач, Проводник, поиск файлов, диспетчер задач и чистильщик диска. Всё ставится и удаляется одним лаунчером, всё откатывается обратно.
+**A Windows shell written in Rust: faster and lighter than the stock one.** A set of small native programs (no .NET, no Electron) that replace parts of Windows: the taskbar, File Explorer, file search, Task Manager and a disk cleaner. One installer puts them in, one click takes them out.
+
+English | [Русский](README.ru.md)
 
 <p align="center"><img src="assets/th.jpg" alt="WinRust" width="480"></p>
 
-## Бенчмарк
+## Benchmark
 
-Одноразовые замеры на одной машине (Windows 11 IoT Enterprise 10.0.26300, RTX 4060 Laptop, NTFS). Это порядок величин, а не лабораторные цифры.
+One-off measurements on one machine (Windows 11 IoT Enterprise 10.0.26300, RTX 4060 Laptop, NTFS). Treat them as orders of magnitude, not lab numbers.
 
-| Что | Windows | WinRust | Разница |
+| What | Windows | WinRust | Difference |
 |---|---|---|---|
-| Поиск файла (rust-search по всему C: против `dir /s` по одной папке) | 8 340 мс | 45 мс | быстрее на **99,5%** |
-| То же против `Get-ChildItem -Recurse` | 16 200 – 28 600 мс | 45 мс | быстрее на **99,7–99,8%** |
-| Открыть окно с папкой (rust-explorer, медиана 5 запусков) | 420 мс | 60 мс | быстрее на **86%** |
-| Память оболочки (topbar + rust-explorer + rs-shell + reshell против explorer.exe) | 366 МБ | 46 МБ | меньше на **87%** |
-| То же вместе с индексом поиска (53 МБ) | 366 МБ | 99 МБ | меньше на **73%** |
-| Размер файлового менеджера | 3 280 КБ | 498 КБ | меньше на **85%** |
-| Размер диспетчера задач | 5 791 КБ | 869 КБ | меньше на **85%** |
-| CPU панели в простое (topbar после оптимизации, % одного ядра) | 0,00–0,10% (explorer) | 0,05–0,10% | на уровне Проводника |
+| File search (rust-search over all of C: vs `dir /s` over one folder) | 8,340 ms | 45 ms | **99.5%** faster |
+| Same vs `Get-ChildItem -Recurse` | 16,200 – 28,600 ms | 45 ms | **99.7–99.8%** faster |
+| Open a folder window (rust-explorer, median of 5 runs) | 420 ms | 60 ms | **86%** faster |
+| Shell memory (topbar + rust-explorer + rs-shell + reshell vs explorer.exe) | 366 MB | 46 MB | **87%** less |
+| Same, plus the search index (53 MB) | 366 MB | 99 MB | **73%** less |
+| File manager binary size | 3,280 KB | 498 KB | **85%** smaller |
+| Task manager binary size | 5,791 KB | 869 KB | **85%** smaller |
+| Idle CPU of the bar (topbar after optimization, % of one core) | 0.00–0.10% (explorer) | 0.05–0.10% | on par with Explorer |
 
-В сумме: **в 85–99% случаев быстрее или меньше, по CPU в простое равны.** Оговорки: rs ищет по готовому индексу MFT (за это платит 53 МБ памяти), а `dir` и PowerShell обходят диск заново; explorer.exe при замере всё ещё работал и держал окна, поэтому выигрыш по памяти немного завышен; поиск Windows и диспетчер задач не сравнивались.
+In short: **85–99% faster or smaller in every size/speed test, and equal on idle CPU.** Caveats: rs searches a ready-made MFT index (it pays 53 MB of memory for that), while `dir` and PowerShell walk the disk from scratch; explorer.exe was still running with its windows during the test, so the memory gain is slightly overstated; Windows Search and the stock Task Manager were not compared.
 
-Один exe (`plugin-launcher.exe`), который ставит и удаляет наши плагины на Windows. Нужны права администратора. В окне все плагины собраны в один набор WinRust: кнопка «Установить WinRust» ставит недостающие по порядку (topbar раньше rust-explorer), когда всё стоит, она же обновляет; «Удалить всё» откатывает. По одному плагину: командная строка ниже.
+## Install
 
-| Плагин | Что делает |
+Download `WinRust.exe` from the [latest release](https://github.com/Lemxy/WinRust/releases/latest), run it as administrator and press "Install WinRust" (the installer window is currently in Russian; an English UI is on the roadmap). "Remove all" rolls everything back. Windows 10/11, x64.
+
+> **Read this first.** WinRust disables Windows Search, replaces the taskbar and can replace the shell. The exe is not code-signed, so SmartScreen will warn. A restore point is created before install, but try it on a spare machine or a VM first.
+
+## What it is
+
+One exe (`plugin-launcher.exe`) that installs and removes our plugins on Windows. Administrator rights are required. In the window all plugins are grouped into one WinRust set: the "Install WinRust" button installs what is missing, in order (topbar before rust-explorer), and updates when everything is already there; "Remove all" rolls back. One plugin at a time: see the command line below.
+
+| Plugin | What it does |
 |---|---|
-| rust-search | поиск файлов по NTFS (Alt+Space); отключает поиск Windows |
-| rtaskmgr-win32 | заменяет диспетчер задач |
-| topbar | нижняя панель в стиле Windows 11 вместо панели задач (сглаженные скругления, подсказки над кнопками, громкость колесом с показом уровня). Вместе с ним ставятся хоткеи рабочих столов (reshell: Win+1/2/3, Win+`) и блок в PowerShell-профиль (`src/profile.ps1`: zoxide, grep=rg, ll=eza, cat=bat; пишется в Windows PowerShell 5.1 и в pwsh 7, если он есть; без rg/eza/bat/zoxide блок молчит). При удалении topbar блок убирается. |
-| rs-du | чистильщик диска (анализ MFT, кеши, `target`/`node_modules`, корзина). Отдельной карточки нет: ставится в папку диспетчера задач вместе с rtaskmgr-win32 или topbar и запускается из меню топбара (ПКМ по пустому месту → «Чистильщик диска»). Исходники: `plugins/rs-du` |
-| chrome-rs | заглушка |
-| rs-shell | своя оболочка вместо explorer.exe на один вход пользователя: обои, автозагрузка (Run и Startup), запуск и перезапуск topbar, при частых падениях topbar отдаёт сеанс explorer.exe. Кладётся рядом с `topbar.exe`; `rs-shell --dry-run` показывает, что запустит; `--enable` / `--disable` включают и выключают (только HKCU, остальные пользователи не затронуты). Лаунчером пока не ставится. Исходники: `plugins/rs-shell` |
-| rust-explorer | **Плагин в лаунчере.** Файловый менеджер на Rust вместо Проводника в стиле Windows: панель слева (быстрый доступ, диски), колонки «Имя / Дата / Тип / Размер», вкладки, тёмная тема. Установка открывает в нём папки и диски (HKCU), запускает `rs-shell --overlay` при входе и **отключает обычный explorer.exe** как оболочку (AutoRestartShell=0, Explorer завершается, когда поднялись topbar и рабочий стол; если topbar не держится, Explorer возвращается сам). Нужен topbar. Удаление всё возвращает. Раньше было: замена окон Проводника на Rust (этап 1 плана: файловый менеджер). Пока не ставится лаунчером: запускается вручную `plugins/rust-explorer/target/release/rust-explorer.exe [папка]`. Есть: виртуальный список, иконки, вкладки (Ctrl+T/W/Tab), копирование/вставка/удаление через IFileOperation, контекстное меню оболочки, перетаскивание. Не сделано: миниатюры, адресная строка, регистрация обработчиком папок, этапы 2-5 (индекс, оболочка, трей, Shell Launcher). |
+| rust-search | file search over NTFS (Alt+Space); disables Windows Search |
+| rtaskmgr-win32 | replaces Task Manager |
+| topbar | a bottom bar in the Windows 11 style instead of the taskbar (smooth rounded corners, tooltips above buttons, volume on the mouse wheel with a level readout). It installs together with desktop hotkeys (reshell: Win+1/2/3, Win+`) and a block in the PowerShell profile (`src/profile.ps1`: zoxide, grep=rg, ll=eza, cat=bat; written to Windows PowerShell 5.1 and to pwsh 7 if present; silent without rg/eza/bat/zoxide). Uninstalling topbar removes the block. |
+| rs-du | disk cleaner (MFT analysis, caches, `target`/`node_modules`, recycle bin). It has no card of its own: it is installed into the Task Manager folder together with rtaskmgr-win32 or topbar and starts from the bar menu (right-click an empty spot → "Disk cleaner"). Sources: `plugins/rs-du` |
+| chrome-rs | placeholder |
+| rs-shell | its own shell instead of explorer.exe for one user logon: wallpaper, autostart (Run and Startup), starts and restarts topbar, hands the session back to explorer.exe if topbar keeps crashing. Placed next to `topbar.exe`; `rs-shell --dry-run` shows what it would start; `--enable` / `--disable` turn it on and off (HKCU only, other users are untouched). Not installed by the launcher yet. Sources: `plugins/rs-shell` |
+| rust-explorer | **A launcher plugin.** A Rust file manager in the Windows style instead of File Explorer: a left pane (quick access, drives), "Name / Date / Type / Size" columns, tabs, dark theme. Installing it makes folders and drives open in it (HKCU), starts `rs-shell --overlay` at logon and **turns off the regular explorer.exe** as the shell (AutoRestartShell=0; Explorer exits once topbar and the desktop are up; if topbar does not hold, Explorer comes back by itself). Needs topbar. Uninstall reverts everything. Features: virtual list, icons, tabs (Ctrl+T/W/Tab), copy/paste/delete via IFileOperation, the shell context menu, drag and drop. Not done: thumbnails, address bar, registering as the folder handler, stages 2-5 of the plan (index, shell, tray, Shell Launcher). |
 
-## Структура
+## Layout
 ```
-src/            лаунчер (окно + логика установки)
-payload/        готовые exe плагинов, вшиваются в лаунчер при сборке
-plugins/        исходники: rust-search, rtaskmgr-win32, chrome-rs (каждый отдельный cargo-проект)
-scripts/        build-all.ps1: синхронизирует plugins/ с оригиналами, пересобирает, обновляет payload/ и STAMPS.txt; sync.ps1 -Check: проверка на рассинхрон (запускать с -ExecutionPolicy Bypass)
-ROADMAP.md      планы
+src/            the launcher (window + install logic)
+payload/        built plugin exes, embedded into the launcher at build time (not in git)
+plugins/        sources: rust-search, rtaskmgr-win32, topbar, rust-explorer, rs-shell, rs-du, ... (each is its own cargo project)
+scripts/        build-all.ps1: syncs plugins/ with the originals, rebuilds, refreshes payload/ and STAMPS.txt; sync.ps1 -Check: drift check (run with -ExecutionPolicy Bypass)
+ROADMAP.md      plans
 ```
 
-## Сборка
+## Build
 ```powershell
 .\scripts\build-all.ps1
 ```
-Результат: `target\release\plugin-launcher.exe`. Закройте запущенный лаунчер перед сборкой.
+Result: `target\release\plugin-launcher.exe`. Close a running launcher before building. Note: `build-all.ps1` currently syncs `rust-search` and `rtaskmgr-win32` from the author's own working folders (see `scripts\sync.ps1`), so a clean clone needs that step adapted.
 
-
-## Командная строка
-Из терминала **с правами администратора**:
+## Command line
+From a terminal **with administrator rights**:
 ```
 plugin-launcher list
-plugin-launcher install <плагин> --yes   (без --yes только покажет предупреждение, ничего не меняет)
-plugin-launcher update <плагин>          (переустановить из payload\ рядом с exe: без пересборки лаунчера; см. scripts\update-plugin.ps1)
-plugin-launcher uninstall <плагин>
+plugin-launcher install <plugin> --yes   (without --yes it only prints the warning and changes nothing)
+plugin-launcher update <plugin>          (reinstall from payload\ next to the exe, no launcher rebuild; see scripts\update-plugin.ps1)
+plugin-launcher uninstall <plugin>
 plugin-launcher rollback --yes
 ```
-Код выхода: 0 успех, 1 ошибка, 2 неверные аргументы или нет `--yes`. Без аргументов открывается окно.
+Exit codes: 0 success, 1 error, 2 bad arguments or no `--yes`. With no arguments the window opens.
 
-## Новый плагин
-Одна запись в `PLUGINS` (`src/main.rs`): имя, описание, предупреждение, `installed`, пара функций install/uninstall и значок `glyph`. Окно, высота списка и CLI подхватят её сами.
+## New plugin
+One entry in `PLUGINS` (`src/main.rs`): name, description, warning, `installed`, an install/uninstall function pair and a `glyph` icon. The window, the list height and the CLI pick it up on their own.
