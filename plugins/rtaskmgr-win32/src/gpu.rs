@@ -197,6 +197,9 @@ mod tests {
 
     #[test]
     fn real_adapters_have_memory_directx_location_and_temperature() {
+        if std::env::var_os("CI").is_some() {
+            return; // GitHub's VMs have no GPU (DXGI lists no adapter)
+        }
         let a = adapters();
         assert!(!a.is_empty(), "DXGI должен вернуть хотя бы один адаптер");
         for g in &a {

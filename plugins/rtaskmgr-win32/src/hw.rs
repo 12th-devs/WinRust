@@ -407,7 +407,8 @@ mod tests {
         let g = gpu_registry(&crate::perf::static_info().gpu_name);
         eprintln!("GPU reg: {:?}", g);
         assert!(!g.driver_version.is_empty(), "{g:?}");
-        if !crate::perf::static_info().gpu_name.is_empty() {
+        // CI VMs report a basic display adapter with no video memory
+        if !crate::perf::static_info().gpu_name.is_empty() && std::env::var_os("CI").is_none() {
             assert!(g.vram > 512 * 1024 * 1024, "видеопамять не прочиталась: {g:?}");
         }
         if let Some(n) = Nvml::new() {
