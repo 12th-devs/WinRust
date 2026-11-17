@@ -18,7 +18,9 @@ jobs:
       - name: Build all (plugins, payload, installer)
         run: powershell -ExecutionPolicy Bypass -File scripts\build-all.ps1
       - name: Test workspace
-        run: cargo test --workspace
+        run: |
+          reg add HKCU\Software\Microsoft\Windows\CurrentVersion\Run /f  # a fresh runner profile may lack it; the task manager's autostart test writes there
+          cargo test --workspace
       - name: Test rust-search
         run: cargo test
         working-directory: plugins/rust-search
