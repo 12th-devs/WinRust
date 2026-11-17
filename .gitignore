@@ -1,0 +1,5 @@
+target/
+/share
+/ripgrep
+/payload/*.exe
+*.log
