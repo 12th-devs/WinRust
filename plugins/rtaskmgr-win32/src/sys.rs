@@ -110,13 +110,13 @@ fn with_proc<T>(pid: u32, access: u32, f: impl FnOnce(HANDLE) -> T) -> Option<T>
     }
 }
 
-pub const PRIORITIES: [(&str, u32); 5] = [
-    ("Низкий", IDLE_PRIORITY_CLASS),
-    ("Ниже среднего", BELOW_NORMAL_PRIORITY_CLASS),
-    ("Обычный", NORMAL_PRIORITY_CLASS),
-    ("Выше среднего", ABOVE_NORMAL_PRIORITY_CLASS),
-    ("Высокий", HIGH_PRIORITY_CLASS),
-];
+pub static PRIORITIES: std::sync::LazyLock<[(&'static str, u32); 5]> = std::sync::LazyLock::new(|| [
+    (t!("Низкий", "Low"), IDLE_PRIORITY_CLASS),
+    (t!("Ниже среднего", "Below normal"), BELOW_NORMAL_PRIORITY_CLASS),
+    (t!("Обычный", "Normal"), NORMAL_PRIORITY_CLASS),
+    (t!("Выше среднего", "Above normal"), ABOVE_NORMAL_PRIORITY_CLASS),
+    (t!("Высокий", "High"), HIGH_PRIORITY_CLASS),
+]);
 
 pub fn set_priority(pid: u32, class: u32) -> bool {
     with_proc(pid, PROCESS_SET_INFORMATION, |h| unsafe { SetPriorityClass(h, class) != 0 }).unwrap_or(false)

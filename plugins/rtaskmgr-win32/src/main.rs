@@ -1,4 +1,6 @@
 #![windows_subsystem = "windows"]
+#[macro_use]
+mod i18n;
 mod app;
 mod data;
 mod draw;
@@ -31,7 +33,7 @@ use winapi::um::winuser::*;
 fn net_selftest(out: &str) {
     use std::io::{Read, Write};
     let report = (|| -> Result<String, String> {
-        let ses = net::start().ok_or("не удалось запустить ETW-сессию (нужны права администратора)")?;
+        let ses = net::start().ok_or(t!("не удалось запустить ETW-сессию (нужны права администратора)", "could not start the ETW session (administrator rights needed)"))?;
         std::thread::sleep(Duration::from_millis(500));
         let l = std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
         let addr = l.local_addr().map_err(|e| e.to_string())?;
@@ -55,9 +57,9 @@ fn net_selftest(out: &str) {
         let all = net::drain();
         net::stop(ses);
         let (rx, tx) = all.get(&me).copied().unwrap_or((0, 0));
-        Ok(format!("pid={me} принято={rx} отправлено={tx} процессов_в_данных={}", all.len()))
+        Ok(tf!("pid={me} принято={rx} отправлено={tx} процессов_в_данных={}", "pid={me} received={rx} sent={tx} processes_in_data={}", all.len()))
     })();
-    let _ = std::fs::write(out, report.unwrap_or_else(|e| format!("ОШИБКА: {e}")));
+    let _ = std::fs::write(out, report.unwrap_or_else(|e| tf!("ОШИБКА: {e}", "ERROR: {e}")));
 }
 
 fn xy(l: isize) -> (i32, i32) {
@@ -130,13 +132,13 @@ fn main() {
         .icon(Some(&icon_big))
         .size((cfg.size.0 as i32, cfg.size.1 as i32))
         .position(cfg.pos)
-        .title("Диспетчер задач")
+        .title(t!("Диспетчер задач", "Task Manager"))
         .build(&mut win)
         .unwrap();
     let mut search = nwg::TextInput::default();
     nwg::TextInput::builder()
         .parent(&win)
-        .placeholder_text(Some("Введите имя, издателя или PID для поиска"))
+        .placeholder_text(Some(t!("Введите имя, издателя или PID для поиска", "Type a name, publisher or PID to search")))
         .flags(nwg::TextInputFlags::VISIBLE | nwg::TextInputFlags::TAB_STOP)
         .position((0, 0))
         .size((300, 20))
@@ -147,7 +149,7 @@ fn main() {
     #[allow(deprecated)]
     nwg::Timer::builder().parent(&win).interval(1000).stopped(false).build(&mut timer).unwrap();
     let mut tray = nwg::TrayNotification::default();
-    nwg::TrayNotification::builder().parent(&win).icon(Some(&tray_icon)).tip(Some("Диспетчер задач (Rust)")).build(&mut tray).unwrap();
+    nwg::TrayNotification::builder().parent(&win).icon(Some(&tray_icon)).tip(Some(t!("Диспетчер задач (Rust)", "Task Manager (Rust)"))).build(&mut tray).unwrap();
 
     let ui = Ui {
         page,

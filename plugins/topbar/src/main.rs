@@ -15,6 +15,8 @@ use std::{
     collections::HashMap,
     sync::atomic::{AtomicBool, AtomicIsize, Ordering::Relaxed},
 };
+#[macro_use]
+mod i18n;
 mod fly;
 use windows::{
     Win32::{
@@ -1403,8 +1405,8 @@ unsafe fn screenshot() -> Option<String> {
 /// PrtSc pressed: take the screenshot, then say so above the bar for a moment.
 unsafe fn screenshot_notice(bar: HWND) {
     let msg = match screenshot() {
-        Some(n) => format!("Скриншот сохранён: {n}\nи скопирован в буфер обмена"),
-        None => "Не удалось сделать скриншот".to_string(),
+        Some(n) => tf!("Скриншот сохранён: {n}\nи скопирован в буфер обмена", "Screenshot saved: {n}\nand copied to the clipboard"),
+        None => t!("Не удалось сделать скриншот", "Could not take a screenshot").to_string(),
     };
     KillTimer(bar, 2);
     show_tip(msg, GetSystemMetrics(SM_CXSCREEN) / 2);
@@ -1681,6 +1683,9 @@ fn wstr_of(w: &[u16]) -> String {
 
 /// "1 окно", "3 окна", "5 окон".
 fn windows_ru(n: usize) -> String {
+    if crate::i18n::english() {
+        return format!("{n} {}", if n == 1 { "window" } else { "windows" });
+    }
     let w = match (n % 10, n % 100) {
         (1, x) if x != 11 => "окно",
         (2..=4, x) if !(12..=14).contains(&x) => "окна",
@@ -1708,9 +1713,9 @@ unsafe fn app_menu(hwnd: HWND, h: i32) {
     let stem = std::path::Path::new(&launch).file_stem().unwrap_or_default().to_string_lossy().to_string();
     let name: String = stem.chars().take(1).flat_map(char::to_uppercase).chain(stem.chars().skip(1)).collect();
     let sub = match (wins.len(), pin.is_some()) {
-        (0, _) => "Закреплено · не запущено".to_string(),
-        (n, true) => format!("Закреплено · {}", windows_ru(n)),
-        (n, false) => format!("Запущено · {}", windows_ru(n)),
+        (0, _) => t!("Закреплено · не запущено", "Pinned · not running").to_string(),
+        (n, true) => tf!("Закреплено · {}", "Pinned · {}", windows_ru(n)),
+        (n, false) => tf!("Запущено · {}", "Running · {}", windows_ru(n)),
     };
     let icon = if picon.is_null() { bicon } else { picon };
     let mut items: Vec<(fly::MItem, A)> = Vec::new();
@@ -1722,21 +1727,21 @@ unsafe fn app_menu(hwnd: HWND, h: i32) {
         }
     }
     if !launch.is_empty() {
-        let it = fly::MItem::new("\u{E8A7}", if wins.is_empty() { "Открыть" } else { "Новое окно" });
+        let it = fly::MItem::new("\u{E8A7}", if wins.is_empty() { t!("Открыть", "Open") } else { t!("Новое окно", "New window") });
         items.push((if items.is_empty() { it } else { it.sep() }, A::Open));
     }
     if pin.is_some() {
-        items.push((fly::MItem::new("\u{E77A}", "Открепить от панели"), A::Pin));
+        items.push((fly::MItem::new("\u{E77A}", t!("Открепить от панели", "Unpin from the bar")), A::Pin));
     } else if !exe.is_empty() {
-        items.push((fly::MItem::new("\u{E718}", "Закрепить на панели"), A::Pin));
+        items.push((fly::MItem::new("\u{E718}", t!("Закрепить на панели", "Pin to the bar")), A::Pin));
     }
     if !launch.is_empty() {
         let s = fly::start_pinned(&launch);
-        items.push((fly::MItem::new(if s { "\u{E738}" } else { "\u{E710}" }, if s { "Убрать из Пуска" } else { "Добавить в Пуск" }), A::Start));
+        items.push((fly::MItem::new(if s { "\u{E738}" } else { "\u{E710}" }, if s { t!("Убрать из Пуска", "Remove from Start") } else { t!("Добавить в Пуск", "Add to Start") }), A::Start));
     }
     if !wins.is_empty() {
-        items.push((fly::MItem::new("\u{E8BB}", if wins.len() > 1 { "Закрыть все окна" } else { "Закрыть окно" }).sep(), A::Close));
-        items.push((fly::MItem::new("\u{E7BA}", "Завершить процесс").danger(), A::Kill));
+        items.push((fly::MItem::new("\u{E8BB}", if wins.len() > 1 { t!("Закрыть все окна", "Close all windows") } else { t!("Закрыть окно", "Close window") }).sep(), A::Close));
+        items.push((fly::MItem::new("\u{E7BA}", t!("Завершить процесс", "End process")).danger(), A::Kill));
     }
     let acts: Vec<A> = items.iter().map(|x| x.1).collect();
     let items = items.into_iter().map(|x| x.0).collect();

@@ -2,6 +2,8 @@
 // Binaries come from next to this exe, else ..\rust-search\target\release. Needs admin (see app.manifest).
 #![windows_subsystem = "windows"]
 #![allow(unsafe_op_in_unsafe_fn)]
+#[macro_use]
+mod i18n;
 use std::{
     cell::Cell,
     env, fs,
@@ -46,10 +48,19 @@ const fn rgb(r: u8, g: u8, b: u8) -> u32 {
     r as u32 | (g as u32) << 8 | (b as u32) << 16
 }
 
+/// A text in both languages for static tables: `.get()` picks the current one.
+#[derive(Clone, Copy)]
+struct Tr(&'static str, &'static str);
+impl Tr {
+    fn get(&self) -> &'static str {
+        t!(self.0, self.1)
+    }
+}
+
 struct Plugin {
     name: &'static str,
-    desc: &'static str,
-    warn: &'static str, // shown in a confirmation box before install
+    desc: Tr,
+    warn: Tr, // shown in a confirmation box before install
     installed: fn() -> bool,
     actions: Option<(fn() -> Result<(), String>, fn() -> Result<(), String>)>, // (install, uninstall); None = stub
     settings: bool, // shows a gear button that opens the plugin's settings panel
@@ -59,8 +70,8 @@ struct Plugin {
 const PLUGINS: &[Plugin] = &[
     Plugin {
         name: "rust-search",
-        desc: "Быстрый поиск файлов по NTFS (Alt+Space). Заменяет поиск Windows: служба WSearch отключается, SearchHost блокируется.",
-        warn: "Служба поиска Windows (WSearch) будет ОТКЛЮЧЕНА, SearchHost.exe заблокирован, строка поиска на панели задач скрыта: поиск в Пуске, Проводнике и Outlook перестанет работать.",
+        desc: Tr("Быстрый поиск файлов по NTFS (Alt+Space). Заменяет поиск Windows: служба WSearch отключается, SearchHost блокируется.", "Fast NTFS file search (Alt+Space). Replaces Windows Search: the WSearch service is disabled and SearchHost is blocked."),
+        warn: Tr("Служба поиска Windows (WSearch) будет ОТКЛЮЧЕНА, SearchHost.exe заблокирован, строка поиска на панели задач скрыта: поиск в Пуске, Проводнике и Outlook перестанет работать.", "The Windows Search service (WSearch) will be DISABLED, SearchHost.exe blocked and the taskbar search box hidden: search in Start, Explorer and Outlook will stop working."),
         installed: || prog_dir().join("rs.exe").is_file(),
         actions: Some((install, uninstall)),
         settings: false,
@@ -69,8 +80,8 @@ const PLUGINS: &[Plugin] = &[
     },
     Plugin {
         name: "rtaskmgr-win32",
-        desc: "Диспетчер задач на Rust. Заменяет стандартный: Ctrl+Shift+Esc и запуск taskmgr.exe открывают его.",
-        warn: "Стандартный диспетчер задач будет ЗАМЕНЁН: любой запуск taskmgr.exe откроет rtaskmgr-win32.",
+        desc: Tr("Диспетчер задач на Rust. Заменяет стандартный: Ctrl+Shift+Esc и запуск taskmgr.exe открывают его.", "A task manager in Rust. Replaces the stock one: Ctrl+Shift+Esc and launching taskmgr.exe open it."),
+        warn: Tr("Стандартный диспетчер задач будет ЗАМЕНЁН: любой запуск taskmgr.exe откроет rtaskmgr-win32.", "The stock Task Manager will be REPLACED: any launch of taskmgr.exe opens rtaskmgr-win32."),
         installed: || run("reg", &["query", TM_KEY, "/v", "Debugger"]).is_ok(),
         actions: Some((tm_install, tm_uninstall)),
         settings: false,
@@ -79,8 +90,8 @@ const PLUGINS: &[Plugin] = &[
     },
     Plugin {
         name: "topbar",
-        desc: "Нижняя панель в стиле Windows 11 вместо панели задач: окна, часы, меню. Стандартная панель скрывается. Вместе с ней ставятся хоткеи рабочих столов (Win+1/2/3, Win+`).",
-        warn: "Панель задач Windows будет СКРЫТА и заменена панелью внизу экрана. Удаление плагина возвращает её.",
+        desc: Tr("Нижняя панель в стиле Windows 11 вместо панели задач: окна, часы, меню. Стандартная панель скрывается. Вместе с ней ставятся хоткеи рабочих столов (Win+1/2/3, Win+`).", "A Windows 11-style bottom bar instead of the taskbar: windows, clock, menus. The stock taskbar is hidden. Desktop hotkeys (Win+1/2/3, Win+`) are installed with it."),
+        warn: Tr("Панель задач Windows будет СКРЫТА и заменена панелью внизу экрана. Удаление плагина возвращает её.", "The Windows taskbar will be HIDDEN and replaced by a bar at the bottom of the screen. Uninstalling the plugin brings it back."),
         installed: || bar_dir().join("topbar.exe").is_file(),
         actions: Some((bar_install, bar_uninstall)),
         settings: true,
@@ -89,8 +100,8 @@ const PLUGINS: &[Plugin] = &[
     },
     Plugin {
         name: "rust-explorer",
-        desc: "Файловый менеджер на Rust вместо Проводника: папки и диски открываются в нём (Win+E тоже), рабочий стол рисует он сам. Обычный explorer.exe как оболочка ОТКЛЮЧАЕТСЯ. Нужен topbar.",
-        warn: "ОБЫЧНЫЙ Explorer будет ОТКЛЮЧЁН: после установки панель задач, рабочий стол и окна папок дают topbar и rust-explorer. Сначала установите topbar, без него не будет панели. Ещё для экономии RAM отключаются службы DiagTrack, PcaSvc, InventorySvc, lfsvc (геолокация), cbdhsvc (журнал буфера Win+V), DoSvc ставится вручную, службы svchost объединяются (полностью после перезагрузки); удаление плагина вернёт их. Если что-то пойдёт не так: Ctrl+Alt+Del, Диспетчер задач, Запустить новую задачу, explorer.exe; затем удалите плагин.",
+        desc: Tr("Файловый менеджер на Rust вместо Проводника: папки и диски открываются в нём (Win+E тоже), рабочий стол рисует он сам. Обычный explorer.exe как оболочка ОТКЛЮЧАЕТСЯ. Нужен topbar.", "A Rust file manager instead of Explorer: folders and drives open in it (Win+E too), and it draws the desktop itself. The regular explorer.exe as the shell is DISABLED. Requires topbar."),
+        warn: Tr("ОБЫЧНЫЙ Explorer будет ОТКЛЮЧЁН: после установки панель задач, рабочий стол и окна папок дают topbar и rust-explorer. Сначала установите topbar, без него не будет панели. Ещё для экономии RAM отключаются службы DiagTrack, PcaSvc, InventorySvc, lfsvc (геолокация), cbdhsvc (журнал буфера Win+V), DoSvc ставится вручную, службы svchost объединяются (полностью после перезагрузки); удаление плагина вернёт их. Если что-то пойдёт не так: Ctrl+Alt+Del, Диспетчер задач, Запустить новую задачу, explorer.exe; затем удалите плагин.", "The REGULAR Explorer will be DISABLED: after install, topbar and rust-explorer provide the taskbar, the desktop and folder windows. Install topbar first, without it there will be no bar. To save RAM the services DiagTrack, PcaSvc, InventorySvc, lfsvc (geolocation) and cbdhsvc (Win+V clipboard history) are also disabled, DoSvc is set to manual, and svchost services are merged (fully after a reboot); uninstalling the plugin restores them. If something goes wrong: Ctrl+Alt+Del, Task Manager, Run new task, explorer.exe; then uninstall the plugin."),
         installed: || rx_dir().join("rust-explorer.exe").is_file(),
         actions: Some((rx_install, rx_uninstall)),
         settings: false,
@@ -99,8 +110,8 @@ const PLUGINS: &[Plugin] = &[
     },
     Plugin {
         name: "wiztree",
-        desc: "Анализ диска: карта занятого места (treemap) по MFT за секунды. Ярлык «WinRust Disk» в меню Пуск, запускается от администратора.",
-        warn: "Ничего системного не меняется: файл в Program Files и ярлык в меню Пуск.",
+        desc: Tr("Анализ диска: карта занятого места (treemap) по MFT за секунды. Ярлык «WinRust Disk» в меню Пуск, запускается от администратора.", "Disk analysis: a treemap of used space from the MFT in seconds. A 'WinRust Disk' shortcut in the Start menu, runs as administrator."),
+        warn: Tr("Ничего системного не меняется: файл в Program Files и ярлык в меню Пуск.", "Nothing in the system is changed: a file in Program Files and a Start menu shortcut."),
         installed: || wz_dir().join("wiztree.exe").is_file(),
         actions: Some((wz_install, wz_uninstall)),
         settings: false,
@@ -109,8 +120,8 @@ const PLUGINS: &[Plugin] = &[
     },
     Plugin {
         name: "photoview",
-        desc: "Просмотр фото: открывается мгновенно, листает папку стрелками, учитывает поворот из EXIF. Появляется в «Открыть с помощью» (по умолчанию не назначается).",
-        warn: "Программа добавляется в «Открыть с помощью» для jpg, png, bmp, gif, tiff, webp, heic, avif. Приложением по умолчанию её делаете вы сами в Параметрах.",
+        desc: Tr("Просмотр фото: открывается мгновенно, листает папку стрелками, учитывает поворот из EXIF. Появляется в «Открыть с помощью» (по умолчанию не назначается).", "Photo viewer: opens instantly, browses the folder with the arrow keys, honors EXIF rotation. Appears in 'Open with' (not set as the default)."),
+        warn: Tr("Программа добавляется в «Открыть с помощью» для jpg, png, bmp, gif, tiff, webp, heic, avif. Приложением по умолчанию её делаете вы сами в Параметрах.", "The program is added to 'Open with' for jpg, png, bmp, gif, tiff, webp, heic, avif. You make it the default app yourself in Settings."),
         installed: || pv_dir().join("photoview.exe").is_file(),
         actions: Some((pv_install, pv_uninstall)),
         settings: false,
@@ -119,15 +130,15 @@ const PLUGINS: &[Plugin] = &[
     },
     Plugin {
         name: "debloat",
-        desc: "Отключает мусор Windows: телеметрию, Copilot, Recall, рекламу в Пуске, фон Edge. Только обратимое, старые значения запоминаются.",
-        warn: "Будут ОТКЛЮЧЕНЫ несколько служб (телеметрия, карты, отчёты об ошибках) и выставлены политики реестра (Copilot, Recall, реклама, фон Edge; Edge покажет «управляется организацией»). Старые значения сохраняются, uninstall debloat возвращает всё. Приложения не удаляются.",
+        desc: Tr("Отключает мусор Windows: телеметрию, Copilot, Recall, рекламу в Пуске, фон Edge. Только обратимое, старые значения запоминаются.", "Disables Windows junk: telemetry, Copilot, Recall, Start menu ads, the Edge background. Reversible changes only, old values are remembered."),
+        warn: Tr("Будут ОТКЛЮЧЕНЫ несколько служб (телеметрия, карты, отчёты об ошибках) и выставлены политики реестра (Copilot, Recall, реклама, фон Edge; Edge покажет «управляется организацией»). Старые значения сохраняются, uninstall debloat возвращает всё. Приложения не удаляются.", "Several services will be DISABLED (telemetry, maps, error reporting) and registry policies set (Copilot, Recall, ads, Edge background; Edge will show 'managed by your organization'). Old values are saved, uninstall debloat restores everything. No apps are removed."),
         installed: || db_dir().join("debloat.exe").is_file(),
         actions: Some((db_install, db_uninstall)),
         settings: false,
         bulk: false, // changes system behaviour: only on request, never as part of "install everything"
         glyph: "\u{E74D}", // delete
     },
-    Plugin { name: "chrome-rs", desc: "Браузер на Rust. Установка пока недоступна (заглушка).", warn: "", installed: || false, actions: None, settings: false, bulk: true, glyph: "\u{E774}" }, // globe
+    Plugin { name: "chrome-rs", desc: Tr("Браузер на Rust. Установка пока недоступна (заглушка).", "A browser in Rust. Installation is not available yet (placeholder)."), warn: Tr("", ""), installed: || false, actions: None, settings: false, bulk: true, glyph: "\u{E774}" }, // globe
 ];
 
 static BUSY: AtomicBool = AtomicBool::new(false);
@@ -238,15 +249,15 @@ fn with_payload<T>(need: &[&str], f: impl FnOnce(&Path) -> Result<T, String>) ->
     fs::create_dir_all(&d).map_err(|e| format!("{}: {e}", d.display()))?;
     let disk = disk_payload();
     let unpack = |n: &&str| -> Result<(), String> {
-        let bytes = PAYLOAD.iter().find(|(m, _)| m == n).ok_or(format!("нет {n} в сборке"))?.1;
+        let bytes = PAYLOAD.iter().find(|(m, _)| m == n).ok_or(tf!("нет {n} в сборке", "{n} is missing from the build"))?.1;
         match disk.as_ref().map(|p| p.join(n)).filter(|p| p.is_file()) {
             Some(src) => {
-                log(&format!("{n}: из {}", src.display()));
+                log(&tf!("{n}: из {}", "{n}: from {}", src.display()));
                 fs::copy(src, d.join(n)).map(|_| ())
             }
             None => fs::write(d.join(n), bytes),
         }
-        .map_err(|e| format!("распаковка {n}: {e}"))
+        .map_err(|e| tf!("распаковка {n}: {e}", "unpacking {n}: {e}"))
     };
     let r = need.iter().try_for_each(unpack).and_then(|_| f(&d));
     let _ = fs::remove_dir_all(&d);
@@ -287,10 +298,10 @@ fn tm_install() -> Result<(), String> {
         put(&d.join("Task manager.exe"), &dst)?;
         put(&d.join("rs-du.exe"), &tm_dir().join("rs-du.exe"))?;
         // the search (and the bar's Start panel) lists Start Menu shortcuts only, so without one the task manager is invisible to them
-        soft("ярлык в меню Пуск не создан, поиск не увидит диспетчер", run("powershell", &["-NoProfile", "-Command", &format!("$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{}'); $s.TargetPath='{}'; $s.Save()", tm_lnk().display(), dst.display())]));
+        soft(t!("ярлык в меню Пуск не создан, поиск не увидит диспетчер", "Start menu shortcut was not created, search will not find the task manager"), run("powershell", &["-NoProfile", "-Command", &format!("$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{}'); $s.TargetPath='{}'; $s.Save()", tm_lnk().display(), dst.display())]));
         // elevated start without a UAC prompt (the exe re-launches itself through this task), so it can end protected processes
         let task = format!("$u=[Security.Principal.WindowsIdentity]::GetCurrent().Name; Register-ScheduledTask -TaskName rtaskmgr -Force -Action (New-ScheduledTaskAction -Execute '{}') -Principal (New-ScheduledTaskPrincipal -UserId $u -LogonType Interactive -RunLevel Highest) -Settings (New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances Parallel) | Out-Null", dst.display());
-        soft("задача rtaskmgr не создана, запуск от администратора будет через UAC", run("powershell", &["-NoProfile", "-Command", &task]));
+        soft(t!("задача rtaskmgr не создана, запуск от администратора будет через UAC", "rtaskmgr task was not created, launching as administrator will go through UAC"), run("powershell", &["-NoProfile", "-Command", &task]));
         run("reg", &["add", TM_KEY, "/v", "Debugger", "/t", "REG_SZ", "/d", &format!("\"{}\"", dst.display()), "/f"])
     })
 }
@@ -379,11 +390,11 @@ fn bar_install() -> Result<(), String> {
         if run("powershell", &["-NoProfile", "-Command", &task]).is_ok() && run("schtasks", &["/run", "/tn", "topbar"]).is_ok() {
             let _ = run("reg", &["delete", RUN_KEY, "/v", "topbar", "/f"]);
         } else {
-            WARN.lock().unwrap().push("задача topbar не создана: запуск через Run, без прав администратора".into());
+            WARN.lock().unwrap().push(t!("задача topbar не создана: запуск через Run, без прав администратора", "topbar task was not created: it starts via Run, without administrator rights").into());
             run("reg", &["add", RUN_KEY, "/v", "topbar", "/t", "REG_SZ", "/d", &format!("\"{}\"", dst.display()), "/f"])?;
             let _ = Command::new("explorer.exe").arg(&dst).spawn(); // normal user token, like rs-launcher
         }
-        soft("профиль PowerShell не записан", profile_install()); // a shell nicety, must not fail the bar install
+        soft(t!("профиль PowerShell не записан", "PowerShell profile was not written"), profile_install()); // a shell nicety, must not fail the bar install
         Ok(())
     })
 }
@@ -422,7 +433,7 @@ const SPLIT_DEFAULT: u32 = 3670016; // 3.5 GB: above it Windows gives every serv
 fn rx_trim(on: bool) {
     for (s, off, def) in RX_SVCS {
         let v = if on { off } else { def };
-        soft(&format!("служба {s}"), run("reg", &["add", &format!(r"HKLM\SYSTEM\CurrentControlSet\Services\{s}"), "/v", "Start", "/t", "REG_DWORD", "/d", &v.to_string(), "/f"]));
+        soft(&tf!("служба {s}", "service {s}"), run("reg", &["add", &format!(r"HKLM\SYSTEM\CurrentControlSet\Services\{s}"), "/v", "Start", "/t", "REG_DWORD", "/d", &v.to_string(), "/f"]));
         if on && off == 4 {
             let _ = run("sc.exe", &["stop", s]); // the per-user cbdhsvc_xxxx instance stops at the next sign-in
         }
@@ -437,7 +448,7 @@ fn rx_lnk() -> PathBuf {
 
 fn rx_install() -> Result<(), String> {
     if !bar_dir().join("topbar.exe").is_file() {
-        return Err("сначала установите topbar: без него после отключения Explorer не будет панели".into());
+        return Err(t!("сначала установите topbar: без него после отключения Explorer не будет панели", "install topbar first: without it there will be no bar after Explorer is disabled").into());
     }
     with_payload(&["rust-explorer.exe", "rs-shell.exe"], |d| {
         for n in ["rs-shell.exe", "rust-explorer.exe"] {
@@ -465,7 +476,7 @@ fn rx_install() -> Result<(), String> {
         if run("powershell", &["-NoProfile", "-Command", &task]).is_ok() {
             let _ = run("reg", &["delete", RUN_KEY, "/v", "rs-overlay", "/f"]);
         } else {
-            WARN.lock().unwrap().push("задача rs-overlay не создана: запуск через Run, с задержкой Windows".into());
+            WARN.lock().unwrap().push(t!("задача rs-overlay не создана: запуск через Run, с задержкой Windows", "rs-overlay task was not created: it starts via Run, with a Windows startup delay").into());
             run("reg", &["add", RUN_KEY, "/v", "rs-overlay", "/t", "REG_SZ", "/d", &format!("\"{}\" --overlay", sh.display()), "/f"])?;
         }
         run("reg", &["add", RX_SWITCH, "/v", "ReplaceExplorer", "/t", "REG_DWORD", "/d", "1", "/f"])?;
@@ -474,7 +485,7 @@ fn rx_install() -> Result<(), String> {
         // Start it now, with the user's normal token: explorer.exe opens a shortcut unelevated, and the shortcut carries --overlay.
         let lnk = rx_lnk();
         let _ = fs::create_dir_all(lnk.parent().unwrap());
-        soft("overlay не запущен сейчас: он стартует при следующем входе", run("powershell", &["-NoProfile", "-Command", &format!("$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{}'); $s.TargetPath='{}'; $s.Arguments='--overlay'; $s.Save()", lnk.display(), sh.display())]));
+        soft(t!("overlay не запущен сейчас: он стартует при следующем входе", "overlay is not running now: it starts at the next logon"), run("powershell", &["-NoProfile", "-Command", &format!("$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{}'); $s.TargetPath='{}'; $s.Arguments='--overlay'; $s.Save()", lnk.display(), sh.display())]));
         let _ = Command::new("explorer.exe").arg(&lnk).spawn();
         Ok(())
     })
@@ -530,7 +541,7 @@ fn tool_install(exe: &str, dir: &Path, lnk: Option<&str>) -> Result<(), String> 
         let dst = dir.join(exe);
         put(&d.join(exe), &dst)?;
         if let Some(n) = lnk {
-            soft(&format!("ярлык «{n}» в меню Пуск не создан, поиск его не увидит"), run("powershell", &["-NoProfile", "-Command", &format!("$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{}'); $s.TargetPath='{}'; $s.Save()", start_lnk(n).display(), dst.display())]));
+            soft(&tf!("ярлык «{n}» в меню Пуск не создан, поиск его не увидит", "Start menu shortcut '{n}' was not created, search will not find it"), run("powershell", &["-NoProfile", "-Command", &format!("$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{}'); $s.TargetPath='{}'; $s.Save()", start_lnk(n).display(), dst.display())]));
         }
         Ok(())
     })
@@ -663,36 +674,36 @@ fn uninstall() -> Result<(), String> {
 // Shared by the window and the command line, so both do exactly the same thing.
 fn install_plugin(i: usize) -> Result<String, String> {
     let p = &PLUGINS[i];
-    let (inst, uninst) = p.actions.ok_or("установка недоступна")?;
+    let (inst, uninst) = p.actions.ok_or(t!("установка недоступна", "installation is not available"))?;
     let was = (p.installed)(); // already installed = an update: a failure must not remove the working copy
     WARN.lock().unwrap().clear();
-    soft("точка восстановления не создана", checkpoint());
+    soft(t!("точка восстановления не создана", "restore point was not created"), checkpoint());
     if let Err(e) = inst() {
-        log(&format!("{}: ОШИБКА {e}", p.name));
+        log(&tf!("{}: ОШИБКА {e}", "{}: ERROR {e}", p.name));
         if was {
             return Err(e);
         }
-        let back = uninst().err().map_or(String::new(), |u| format!("; откат: {u}"));
-        return Err(format!("{e} (установка отменена, изменения возвращены{back})"));
+        let back = uninst().err().map_or(String::new(), |u| tf!("; откат: {u}", "; rollback: {u}"));
+        return Err(tf!("{e} (установка отменена, изменения возвращены{back})", "{e} (installation cancelled, changes reverted{back})"));
     }
     let w = WARN.lock().unwrap().clone();
-    log(&format!("{}: {} {}", p.name, if was { "обновлён" } else { "установлен" }, w.join(" | ")));
-    let note = if w.is_empty() { String::new() } else { format!(r" Предупреждений: {} (см. %ProgramData%\plugin-launcher\install.log).", w.len()) };
-    Ok(format!("{} {}.{note}", p.name, if was { "обновлён" } else { "установлен" }))
+    log(&format!("{}: {} {}", p.name, if was { t!("обновлён", "updated") } else { t!("установлен", "installed") }, w.join(" | ")));
+    let note = if w.is_empty() { String::new() } else { tf!(" Предупреждений: {} (см. %ProgramData%\\plugin-launcher\\install.log).", " Warnings: {} (see %ProgramData%\\plugin-launcher\\install.log).", w.len()) };
+    Ok(format!("{} {}.{note}", p.name, if was { t!("обновлён", "updated") } else { t!("установлен", "installed") }))
 }
 
 fn uninstall_plugin(i: usize) -> Result<String, String> {
     let p = &PLUGINS[i];
-    let (_, uninst) = p.actions.ok_or("удаление недоступно")?;
-    uninst().inspect_err(|e| log(&format!("{}: ОШИБКА удаления {e}", p.name)))?;
-    log(&format!("{}: удалён", p.name));
-    Ok(format!("{} удалён, система восстановлена.", p.name))
+    let (_, uninst) = p.actions.ok_or(t!("удаление недоступно", "uninstall is not available"))?;
+    uninst().inspect_err(|e| log(&tf!("{}: ОШИБКА удаления {e}", "{}: uninstall ERROR {e}", p.name)))?;
+    log(&tf!("{}: удалён", "{}: removed", p.name));
+    Ok(tf!("{} удалён, система восстановлена.", "{} removed, system restored.", p.name))
 }
 
 fn rollback() -> Result<String, String> {
     // reverse install order: rust-explorer (which switched Explorer off) goes before topbar, else the session is left with no panel and no shell
     let errs: Vec<String> = PLUGINS.iter().rev().filter(|p| (p.installed)()).filter_map(|p| p.actions.and_then(|a| a.1().err().map(|e| format!("{}: {e}", p.name)))).collect();
-    if errs.is_empty() { Ok("Все плагины удалены, система восстановлена.".into()) } else { Err(errs.join("; ")) }
+    if errs.is_empty() { Ok(t!("Все плагины удалены, система восстановлена.", "All plugins removed, system restored.").into()) } else { Err(errs.join("; ")) }
 }
 
 // ---------- command line ----------
@@ -730,7 +741,7 @@ fn cli(args: &[String]) -> i32 {
         }
         ["install", n] => match find(n) {
             None => return { say(&format!("unknown plugin: {n}")); 2 },
-            Some(i) if !yes => return { say(&format!("{}\nNothing changed. Repeat with --yes to install {n}.", PLUGINS[i].warn)); 2 },
+            Some(i) if !yes => return { say(&format!("{}\nNothing changed. Repeat with --yes to install {n}.", PLUGINS[i].warn.get())); 2 },
             Some(i) if (PLUGINS[i].installed)() => return { say(&format!("{n} is already installed")); 0 },
             Some(i) => install_plugin(i),
         },
@@ -866,6 +877,7 @@ const ID_OK: usize = 2;
 const ID_CANCEL: usize = 3;
 const ID_SWITCH: usize = 4;
 const ID_GEAR: usize = 5;
+const ID_LANG: usize = 6; // EN / RU switch
 const STARTING: usize = usize::MAX - 1; // JOB before install_all picks its first component
 
 /// Installable components, in install order (topbar comes before rust-explorer, which needs it).
@@ -894,6 +906,11 @@ fn main_box(w: f32) -> Box4 {
 fn switch_box(w: f32) -> Box4 {
     let (d, _, _) = dialog_boxes(w);
     [d[2] - 24.0 - 16.0 - 44.0, d[1] + 78.0 + 23.0, d[2] - 24.0 - 16.0, d[1] + 78.0 + 47.0]
+}
+
+/// The EN / RU switch in the top right corner of the header.
+fn lang_box(w: f32) -> Box4 {
+    [w - M - 96.0, 18.0, w - M, 18.0 + 30.0]
 }
 
 fn rollback_box(w: f32) -> Box4 {
@@ -958,8 +975,8 @@ unsafe fn paint(hwnd: HWND) {
     ui.text("W", [logo[0], logo[1] - 2.0, logo[2], logo[3]], 32.0, 900, rgb(255, 255, 255), DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     let tx = logo[2] + 18.0;
     ui.text("WinRust", [tx, 28.0, w - M, 64.0], 30.0, 700, TEXT, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
-    ui.text(&format!("Оболочка Windows на Rust  \u{00B7}  установлено {n_inst} из {N_READY}"), [tx, 64.0, w - M, 88.0], 13.0, 400, DIM, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
-    ui.text("ВХОДИТ В СОСТАВ", [M + 4.0, LIST_TOP - 26.0, w - M, LIST_TOP - 6.0], 11.0, 700, DIM, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
+    ui.text(&tf!("Оболочка Windows на Rust  \u{00B7}  установлено {n_inst} из {N_READY}", "A Windows shell in Rust  \u{00B7}  {n_inst} of {N_READY} installed"), [tx, 64.0, w - M, 88.0], 13.0, 400, DIM, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
+    ui.text(t!("ВХОДИТ В СОСТАВ", "INCLUDED"), [M + 4.0, LIST_TOP - 26.0, w - M, LIST_TOP - 6.0], 11.0, 700, DIM, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
 
     // component list
     ui.round([M, LIST_TOP, w - M, LIST_TOP + LIST_H], 12.0, PANEL, BORDER);
@@ -985,13 +1002,13 @@ unsafe fn paint(hwnd: HWND) {
         ui.text_in(p.glyph, tile, 16.0, 400, if lit { ACCENT } else { TEXT }, DT_CENTER | DT_VCENTER | DT_SINGLELINE, "Segoe MDL2 Assets");
 
         let (pill, pc) = if working {
-            (if job == n { "Удаление…" } else { "Установка…" }, ACCENT)
+            (if job == n { t!("Удаление…", "Removing…") } else { t!("Установка…", "Installing…") }, ACCENT)
         } else if installed {
-            ("Установлен", GOOD)
+            (t!("Установлен", "Installed"), GOOD)
         } else if queued {
-            ("В очереди", DIM)
+            (t!("В очереди", "Queued"), DIM)
         } else {
-            ("Не установлен", DIM)
+            (t!("Не установлен", "Not installed"), DIM)
         };
         let pr = r[2] - 14.0 - 32.0 - 10.0;
         let pw = ui.width(pill, 11.5, 600) + 18.0;
@@ -1002,7 +1019,8 @@ unsafe fn paint(hwnd: HWND) {
 
         let nx = tile[2] + 14.0;
         ui.text(p.name, [nx, r[1] + 11.0, pb[0] - 10.0, r[1] + 32.0], 14.5, 600, TEXT, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
-        let short = p.desc.split(". ").next().unwrap_or(p.desc).trim_end_matches('.');
+        let desc = p.desc.get();
+        let short = desc.split(". ").next().unwrap_or(desc).trim_end_matches('.');
         ui.text(short, [nx, r[1] + 32.0, pb[0] - 10.0, r[3] - 10.0], 12.0, 400, DIM, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
 
         if let Some((_, gb)) = gear.filter(|&(gi, _)| gi == i && installed) {
@@ -1022,19 +1040,19 @@ unsafe fn paint(hwnd: HWND) {
             ui.shape([mb[0], mb[1], mb[0] + (mb[2] - mb[0]) * done, mb[3]], 12.0, argb(ACCENT, 255));
         }
         let label = if job == n {
-            "Удаление WinRust…".to_string()
+            t!("Удаление WinRust…", "Removing WinRust…").to_string()
         } else {
-            pos.map_or("Подготовка…".into(), |q| format!("Устанавливается {}  ({} из {N_READY})", PLUGINS[job].name, q + 1))
+            pos.map_or(t!("Подготовка…", "Preparing…").into(), |q| tf!("Устанавливается {}  ({} из {N_READY})", "Installing {}  ({} of {N_READY})", PLUGINS[job].name, q + 1))
         };
         ui.text(&label, mb, 15.5, 700, TEXT, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     } else {
         let all = n_inst == N_READY;
         let label = if all {
-            "Обновить WinRust".to_string()
+            t!("Обновить WinRust", "Update WinRust").to_string()
         } else if n_inst == 0 {
-            "Установить WinRust".into()
+            t!("Установить WinRust", "Install WinRust").into()
         } else {
-            format!("Доустановить WinRust  ({} из {N_READY})", N_READY - n_inst)
+            tf!("Доустановить WinRust  ({} из {N_READY})", "Finish installing WinRust  ({} of {N_READY})", N_READY - n_inst)
         };
         let (fill, fg) = if all { (PANEL, TEXT) } else { (ACCENT, rgb(255, 255, 255)) };
         let fill = if hot(ID_MAIN) { lerp(fill, TEXT, if all { 0.07 } else { 0.14 }) } else { fill };
@@ -1050,9 +1068,9 @@ unsafe fn paint(hwnd: HWND) {
     ui.shape([M, ft, w - M, ft + 1.0 / s], 0.0, argb(BORDER, 255));
     let (m, ok) = MSG.lock().unwrap().clone();
     let (m, dot, fg) = if busy {
-        ("Выполняется, не закрывайте окно…".to_string(), ACCENT, DIM)
+        (t!("Выполняется, не закрывайте окно…", "Working, do not close the window…").to_string(), ACCENT, DIM)
     } else if m.is_empty() {
-        ("Перед установкой создаётся точка восстановления.".into(), DIM, DIM)
+        (t!("Перед установкой создаётся точка восстановления.", "A restore point is created before installing.").into(), DIM, DIM)
     } else if ok {
         (m, GOOD, TEXT)
     } else {
@@ -1063,7 +1081,9 @@ unsafe fn paint(hwnd: HWND) {
     let one_line = ui.width(&m, 12.5, 400) < rb[0] - 16.0 - M - 18.0;
     let tb = [M + 18.0, ft + if one_line { 0.0 } else { 12.0 }, rb[0] - 16.0, WIN_H - if one_line { 0.0 } else { 8.0 }];
     ui.text(&m, tb, 12.5, 400, fg, DT_LEFT | DT_END_ELLIPSIS | if one_line { DT_SINGLELINE | DT_VCENTER } else { DT_WORDBREAK });
-    button(&ui, rb, "Удалить всё", if n_inst > 0 && !busy { 2 } else { 3 }, hot(ID_ROLLBACK));
+    button(&ui, rb, t!("Удалить всё", "Remove all"), if n_inst > 0 && !busy { 2 } else { 3 }, hot(ID_ROLLBACK));
+    // shows the language you would switch to; the other WinRust programs pick the choice up when they start
+    button(&ui, lang_box(w), if i18n::english() { "Русский" } else { "English" }, 1, hot(ID_LANG));
 
     // confirmation dialog over the dimmed window
     if let Some((title, text, ok_label, danger)) = dialog {
@@ -1077,7 +1097,7 @@ unsafe fn paint(hwnd: HWND) {
         ui.text_in(if danger { "\u{E7BA}" } else { "\u{E946}" }, icon, 16.0, 400, accent, DT_CENTER | DT_VCENTER | DT_SINGLELINE, "Segoe MDL2 Assets");
         ui.text(&title, [icon[2] + 14.0, d[1] + 24.0, d[2] - 24.0, d[1] + 60.0], 17.0, 600, TEXT, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         ui.text(&text, [d[0] + 24.0, d[1] + 76.0, d[2] - 24.0, cancel[1] - 12.0], 12.5, 400, DIM, DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS);
-        button(&ui, cancel, "Отмена", 1, hot(ID_CANCEL));
+        button(&ui, cancel, t!("Отмена", "Cancel"), 1, hot(ID_CANCEL));
         let okfill = if hot(ID_OK) { lerp(accent, TEXT, 0.14) } else { accent };
         ui.round(okb, 8.0, okfill, okfill);
         ui.text(&ok_label, okb, 13.5, 600, rgb(255, 255, 255), DT_CENTER | DT_VCENTER | DT_SINGLELINE);
@@ -1092,19 +1112,19 @@ unsafe fn paint(hwnd: HWND) {
         let tint = lerp(PANEL, ACCENT, 0.18);
         ui.round(icon, 18.0, tint, tint);
         ui.text_in("\u{E713}", icon, 16.0, 400, ACCENT, DT_CENTER | DT_VCENTER | DT_SINGLELINE, "Segoe MDL2 Assets");
-        ui.text(&format!("Настройки {}", PLUGINS[i].name), [icon[2] + 14.0, d[1] + 24.0, d[2] - 24.0, d[1] + 60.0], 17.0, 600, TEXT, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        ui.text(&tf!("Настройки {}", "{} settings", PLUGINS[i].name), [icon[2] + 14.0, d[1] + 24.0, d[2] - 24.0, d[1] + 60.0], 17.0, 600, TEXT, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         let row = [d[0] + 24.0, d[1] + 78.0, d[2] - 24.0, d[1] + 148.0];
         let hid = od_hidden();
         ui.round(row, 10.0, PANEL, BORDER);
-        ui.text("Отключение OneDrive", [row[0] + 16.0, row[1] + 10.0, row[2] - 80.0, row[1] + 32.0], 14.0, 600, TEXT, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
-        ui.text("Значок OneDrive не показывается в топбаре (по умолчанию). Синхронизация продолжает работать.", [row[0] + 16.0, row[1] + 32.0, row[2] - 80.0, row[3] - 6.0], 12.0, 400, DIM, DT_LEFT | DT_WORDBREAK);
+        ui.text(t!("Отключение OneDrive", "Disable OneDrive"), [row[0] + 16.0, row[1] + 10.0, row[2] - 80.0, row[1] + 32.0], 14.0, 600, TEXT, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
+        ui.text(t!("Значок OneDrive не показывается в топбаре (по умолчанию). Синхронизация продолжает работать.", "The OneDrive icon is not shown in the bar (default). Sync keeps working."), [row[0] + 16.0, row[1] + 32.0, row[2] - 80.0, row[3] - 6.0], 12.0, 400, DIM, DT_LEFT | DT_WORDBREAK);
         let sw = switch_box(w);
         let off = lerp(PANEL, TEXT, 0.25);
         let track = if hid { ACCENT } else { off };
         ui.round(sw, 12.0, track, track);
         let kx = if hid { sw[2] - 12.0 } else { sw[0] + 12.0 };
         ui.round([kx - 8.0, sw[1] + 4.0, kx + 8.0, sw[3] - 4.0], 8.0, TEXT, TEXT);
-        button(&ui, closeb, "Закрыть", 1, hot(ID_CANCEL));
+        button(&ui, closeb, t!("Закрыть", "Close"), 1, hot(ID_CANCEL));
     }
 
     GdipDeleteGraphics(g);
@@ -1155,6 +1175,9 @@ unsafe fn hit(hwnd: HWND, lp: isize) -> Option<usize> {
     if gear_box(w).is_some_and(|(i, b)| INSTALLED[i].load(Relaxed) && inside(b)) {
         return Some(ID_GEAR);
     }
+    if inside(lang_box(w)) {
+        return Some(ID_LANG);
+    }
     if inside(main_box(w)) {
         return Some(ID_MAIN);
     }
@@ -1171,7 +1194,7 @@ fn start(hwnd: HWND, which: usize, job: impl FnOnce() -> Result<String, String> 
     thread::spawn(move || {
         *MSG.lock().unwrap() = match job() {
             Ok(m) => (m, true),
-            Err(e) => (format!("Ошибка: {e}"), false),
+            Err(e) => (tf!("Ошибка: {e}", "Error: {e}"), false),
         };
         refresh();
         BUSY.store(false, Relaxed);
@@ -1191,15 +1214,15 @@ fn install_all(h: isize) -> Result<String, String> {
         JOB.store(i, Relaxed);
         unsafe { InvalidateRect(h as HWND, null(), 0) };
         if let Err(e) = install_plugin(i) {
-            let ok = if done.is_empty() { String::new() } else { format!(" Уже готово: {}.", done.join(", ")) };
+            let ok = if done.is_empty() { String::new() } else { tf!(" Уже готово: {}.", " Already done: {}.", done.join(", ")) };
             return Err(format!("{}: {e}.{ok}", PLUGINS[i].name));
         }
         warned |= !WARN.lock().unwrap().is_empty(); // install_plugin clears the list for each component
         done.push(PLUGINS[i].name);
         refresh();
     }
-    let note = if warned { r" Есть предупреждения (см. %ProgramData%\plugin-launcher\install.log)." } else { "" };
-    Ok(format!("WinRust {}: {}.{note}", if all { "обновлён" } else { "установлен" }, done.join(", ")))
+    let note = if warned { t!(" Есть предупреждения (см. %ProgramData%\\plugin-launcher\\install.log).", " There are warnings (see %ProgramData%\\plugin-launcher\\install.log).") } else { "" };
+    Ok(format!("WinRust {}: {}.{note}", if all { t!("обновлён", "updated") } else { t!("установлен", "installed") }, done.join(", ")))
 }
 
 unsafe fn ask(hwnd: HWND, d: Dialog) {
@@ -1228,7 +1251,7 @@ unsafe fn click(hwnd: HWND, id: usize) {
     if SETTINGS.get().is_some() {
         if id == ID_SWITCH {
             if let Err(e) = set_od_hidden(!od_hidden()) {
-                *MSG.lock().unwrap() = (format!("Ошибка: {e}"), false);
+                *MSG.lock().unwrap() = (tf!("Ошибка: {e}", "Error: {e}"), false);
             }
         } else if id == ID_CANCEL {
             SETTINGS.set(None);
@@ -1244,29 +1267,34 @@ unsafe fn click(hwnd: HWND, id: usize) {
         return;
     }
     match id {
+        ID_LANG => {
+            i18n::set_english(!i18n::english());
+            HOVER.set(None);
+            InvalidateRect(hwnd, null(), 0);
+        }
         ID_GEAR => {
             SETTINGS.set(PLUGINS.iter().position(|p| p.settings));
             HOVER.set(None);
             InvalidateRect(hwnd, null(), 0);
         }
         ID_ROLLBACK => ask(hwnd, Dialog {
-            title: "Удалить WinRust?".into(),
-            text: "Все компоненты будут удалены. Вернутся поиск Windows, стандартный диспетчер задач, панель задач и обычный Проводник.".into(),
-            ok: "Удалить всё".into(),
+            title: t!("Удалить WinRust?", "Remove WinRust?").into(),
+            text: t!("Все компоненты будут удалены. Вернутся поиск Windows, стандартный диспетчер задач, панель задач и обычный Проводник.", "All components will be removed. Windows Search, the stock Task Manager, the taskbar and regular Explorer come back.").into(),
+            ok: t!("Удалить всё", "Remove all").into(),
             danger: true,
             act: Act::Rollback,
         }),
         ID_MAIN if ready().all(|i| INSTALLED[i].load(Relaxed)) => ask(hwnd, Dialog {
-            title: "Обновить WinRust?".into(),
-            text: "Все компоненты будут переустановлены из этой версии установщика. Настройки сохранятся.".into(),
-            ok: "Обновить".into(),
+            title: t!("Обновить WinRust?", "Update WinRust?").into(),
+            text: t!("Все компоненты будут переустановлены из этой версии установщика. Настройки сохранятся.", "All components will be reinstalled from this version of the installer. Settings are kept.").into(),
+            ok: t!("Обновить", "Update").into(),
             danger: false,
             act: Act::InstallAll,
         }),
         ID_MAIN => ask(hwnd, Dialog {
-            title: "Установить WinRust?".into(),
-            text: "Компоненты Windows будут заменены:\n\u{2022} поиск Windows отключается, вместо него rust-search (Alt+Space);\n\u{2022} диспетчер задач заменяется на rtaskmgr;\n\u{2022} панель задач заменяется на topbar (внизу экрана);\n\u{2022} Проводник как оболочка отключается: папки и рабочий стол открывает rust-explorer, отключаются службы телеметрии.\n\nСоздаётся точка восстановления, «Удалить всё» вернёт систему. Если экран останется пустым: Ctrl+Alt+Del \u{2192} Диспетчер задач \u{2192} Запустить explorer.exe.".into(),
-            ok: "Установить".into(),
+            title: t!("Установить WinRust?", "Install WinRust?").into(),
+            text: t!("Компоненты Windows будут заменены:\n\u{2022} поиск Windows отключается, вместо него rust-search (Alt+Space);\n\u{2022} диспетчер задач заменяется на rtaskmgr;\n\u{2022} панель задач заменяется на topbar (внизу экрана);\n\u{2022} Проводник как оболочка отключается: папки и рабочий стол открывает rust-explorer, отключаются службы телеметрии.\n\nСоздаётся точка восстановления, «Удалить всё» вернёт систему. Если экран останется пустым: Ctrl+Alt+Del \u{2192} Диспетчер задач \u{2192} Запустить explorer.exe.", "Windows components will be replaced:\n\u{2022} Windows Search is disabled, rust-search (Alt+Space) takes its place;\n\u{2022} Task Manager is replaced by rtaskmgr;\n\u{2022} the taskbar is replaced by topbar (at the bottom of the screen);\n\u{2022} Explorer as the shell is disabled: rust-explorer opens folders and the desktop, telemetry services are disabled.\n\nA restore point is created, 'Remove all' restores the system. If the screen stays empty: Ctrl+Alt+Del \u{2192} Task Manager \u{2192} Run explorer.exe.").into(),
+            ok: t!("Установить", "Install").into(),
             danger: false,
             act: Act::InstallAll,
         }),

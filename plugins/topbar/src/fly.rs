@@ -596,11 +596,12 @@ fn menu_rows() -> (Vec<(i32, i32)>, i32) {
 /// Right-click menu of an empty spot of the bar.
 pub fn context_menu(x: i32) {
     let items = vec![
-        MItem::new("\u{E713}", "Параметры Windows"),
-        MItem::new("\u{E771}", "Персонализация"),
-        MItem::new("\u{E9D9}", "Диспетчер задач").sep(),
-        MItem::new("\u{E74D}", "Чистильщик диска"),
-        MItem::new("\u{E711}", "Закрыть топбар").danger().sep(),
+        MItem::new("\u{E713}", t!("Параметры Windows", "Windows Settings")),
+        MItem::new("\u{E771}", t!("Персонализация", "Personalization")),
+        MItem::new("\u{E9D9}", t!("Диспетчер задач", "Task Manager")).sep(),
+        MItem::new("\u{E74D}", t!("Чистильщик диска", "Disk Cleaner")),
+        MItem::new("\u{E774}", t!("Язык: Русский → English", "Language: English → Русский")), // shared with the other WinRust programs
+        MItem::new("\u{E711}", t!("Закрыть топбар", "Close the bar")).danger().sep(),
     ];
     menu(x, None, items, |i| unsafe {
         match i {
@@ -609,6 +610,7 @@ pub fn context_menu(x: i32) {
             // with rtaskmgr-win32 installed this is our task manager; a full path because explorer.exe does not search PATH
             2 => open(&wide(&format!(r"{}\System32\taskmgr.exe", std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into())))),
             3 => open_cleaner(),
+            4 => crate::i18n::set_english(!crate::i18n::english()),
             _ => _ = PostMessageW(FindWindowW(wide("topbar").as_ptr(), null()), WM_CLOSE, 0, 0), // quits the bar, brings the Windows taskbar back
         }
     });
@@ -1199,7 +1201,7 @@ unsafe fn paint(hw: HWND, k: Kind) {
                         let store = wstr(&app.1).starts_with("shell:");
                         text(dc, &app.0, RECT { left: rc.left + sc(52), top: rc.top, right: rc.right - sc(110), bottom: rc.bottom }, TEXT, DT_LEFT);
                         SelectObject(dc, f_small);
-                        let kind = if sel && !q.is_empty() { "Enter ↵" } else if store { "Приложение" } else { "" };
+                        let kind = if sel && !q.is_empty() { "Enter ↵" } else if store { t!("Приложение", "App") } else { "" };
                         text(dc, kind, RECT { left: rc.right - sc(110), top: rc.top, right: rc.right - sc(14), bottom: rc.bottom }, DIM, DT_RIGHT);
                         SelectObject(dc, f_txt);
                     }

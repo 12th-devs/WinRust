@@ -19,13 +19,13 @@ struct Source {
     approved: &'static str,
 }
 
-const SOURCES: [Source; 5] = [
-    Source { label: "Реестр, текущий пользователь", hklm: false, run: Some(RUN), approved: "Run" },
-    Source { label: "Реестр, все пользователи", hklm: true, run: Some(RUN), approved: "Run" },
-    Source { label: "Реестр, все пользователи (32-бит)", hklm: true, run: Some(RUN32), approved: "Run32" },
-    Source { label: "Папка автозагрузки (пользователь)", hklm: false, run: None, approved: "StartupFolder" },
-    Source { label: "Папка автозагрузки (все)", hklm: true, run: None, approved: "StartupFolder" },
-];
+static SOURCES: std::sync::LazyLock<[Source; 5]> = std::sync::LazyLock::new(|| [
+    Source { label: t!("Реестр, текущий пользователь", "Registry, current user"), hklm: false, run: Some(RUN), approved: "Run" },
+    Source { label: t!("Реестр, все пользователи", "Registry, all users"), hklm: true, run: Some(RUN), approved: "Run" },
+    Source { label: t!("Реестр, все пользователи (32-бит)", "Registry, all users (32-bit)"), hklm: true, run: Some(RUN32), approved: "Run32" },
+    Source { label: t!("Папка автозагрузки (пользователь)", "Startup folder (user)"), hklm: false, run: None, approved: "StartupFolder" },
+    Source { label: t!("Папка автозагрузки (все)", "Startup folder (all users)"), hklm: true, run: None, approved: "StartupFolder" },
+]);
 
 pub struct Item {
     pub name: String, // имя значения реестра или имя файла

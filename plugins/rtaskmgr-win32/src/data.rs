@@ -332,7 +332,7 @@ impl Data {
                     net: self.net.get(&pid).copied().unwrap_or(0.0),
                     gpu: self.sample.gpu_by_pid.get(&pid).copied().unwrap_or(0.0),
                     reasons: reasons.get(&pid).cloned().unwrap_or_default(),
-                    user: user_cache.entry(pid).or_insert_with(|| sys::process_user(pid).unwrap_or_else(|| "СИСТЕМА".into())).clone(),
+                    user: user_cache.entry(pid).or_insert_with(|| sys::process_user(pid).unwrap_or_else(|| t!("СИСТЕМА", "SYSTEM").into())).clone(),
                     title: match &titles {
                         Some(t) => t.get(&pid).cloned(),
                         None => old_titles.get(&pid).cloned(),
@@ -446,12 +446,12 @@ impl Data {
                         match rule.act {
                             RuleAct::Lower => {
                                 if sys::priority_name(p.pid) != sys::PRIORITIES[1].0 && sys::set_priority(p.pid, sys::PRIORITIES[1].1) {
-                                    notes.push(format!("Правило: «{}» (PID {}) грузил ЦП > {:.0}% — приоритет понижен", p.name, p.pid, rule.cpu));
+                                    notes.push(tf!("Правило: «{}» (PID {}) грузил ЦП > {:.0}% — приоритет понижен", "Rule: '{}' (PID {}) used CPU > {:.0}% - priority lowered", p.name, p.pid, rule.cpu));
                                     self.rules[ri].hits += 1;
                                 }
                             }
                             RuleAct::Notify => {
-                                notes.push(format!("«{}» (PID {}) грузит ЦП больше {:.0}% уже {} с", p.name, p.pid, rule.cpu, rule.secs));
+                                notes.push(tf!("«{}» (PID {}) грузит ЦП больше {:.0}% уже {} с", "'{}' (PID {}) has used more than {:.0}% CPU for {} s", p.name, p.pid, rule.cpu, rule.secs));
                                 self.rules[ri].hits += 1;
                             }
                         }
@@ -495,18 +495,18 @@ impl Data {
         for p in &self.procs {
             groups.entry(group_key(&p.name)).or_default().push(p);
         }
-        let disp = |g: &[&Proc]| if g.len() > 1 { format!("{} ({} шт.)", g[0].name, g.len()) } else { g[0].name.clone() };
+        let disp = |g: &[&Proc]| if g.len() > 1 { tf!("{} ({} шт.)", "{} ({} pcs)", g[0].name, g.len()) } else { g[0].name.clone() };
         let avg = |g: &Vec<&Proc>| g.iter().map(|p| p.avg).sum::<f32>();
         let mut gs: Vec<&Vec<&Proc>> = groups.values().collect();
         gs.sort_by(|a, b| avg(b).total_cmp(&avg(a)));
         for g in gs.iter().take(3) {
             let (a, now): (f32, f32) = (avg(g), g.iter().map(|p| p.cpu).sum());
             if a >= 8.0 {
-                let mut t = format!("ЦП: «{}» занимает в среднем {a:.0}% за последние 30 с (сейчас {now:.0}%).", disp(g));
+                let mut t = tf!("ЦП: «{}» занимает в среднем {a:.0}% за последние 30 с (сейчас {now:.0}%).", "CPU: '{}' averages {a:.0}% over the last 30 s (now {now:.0}%).", disp(g));
                 if g[0].name.eq_ignore_ascii_case("svchost.exe") {
                     let top = g.iter().max_by(|x, y| x.avg.total_cmp(&y.avg)).unwrap();
                     if let Some(s) = self.svc_pids.get(&top.pid) {
-                        t += &format!(" Самый занятый svchost (PID {}) держит службы: {}.", top.pid, s.iter().take(5).cloned().collect::<Vec<_>>().join(", "));
+                        t += &tf!(" Самый занятый svchost (PID {}) держит службы: {}.", " The busiest svchost (PID {}) hosts services: {}.", top.pid, s.iter().take(5).cloned().collect::<Vec<_>>().join(", "));
                     }
                 }
                 out.push(t);
@@ -515,30 +515,30 @@ impl Data {
         if self.mem_pct >= 80.0 {
             gs.sort_by_key(|g| std::cmp::Reverse(g.iter().map(|p| p.mem).sum::<u64>()));
             let top: Vec<String> = gs.iter().take(3).map(|g| format!("{} — {}", disp(g), crate::ui::fmt_mem(g.iter().map(|p| p.mem).sum()))).collect();
-            out.push(format!("Память занята на {:.0}%. Больше всего у: {}.", self.mem_pct, top.join("; ")));
+            out.push(tf!("Память занята на {:.0}%. Больше всего у: {}.", "Memory is {:.0}% used. Biggest users: {}.", self.mem_pct, top.join("; ")));
         }
         let io = self.sample.disk_read + self.sample.disk_write;
         if io > 150.0 * 1_048_576.0 || self.sample.disk_active > 90.0 {
-            out.push(format!("Диск загружен на {:.0}% (чтение+запись {:.0} МБ/с).", self.sample.disk_active, io / 1_048_576.0));
+            out.push(tf!("Диск загружен на {:.0}% (чтение+запись {:.0} МБ/с).", "Disk is {:.0}% busy (read+write {:.0} MB/s).", self.sample.disk_active, io / 1_048_576.0));
         }
         if self.etw.is_some() {
             gs.sort_by(|a, b| b.iter().map(|p| p.net).sum::<f64>().total_cmp(&a.iter().map(|p| p.net).sum::<f64>()));
             if let Some(g) = gs.first() {
                 let n: f64 = g.iter().map(|p| p.net).sum();
                 if n > 1_000_000.0 {
-                    out.push(format!("Сеть: «{}» передаёт {:.1} МБ/с — больше всех остальных.", disp(g), n / 1e6));
+                    out.push(tf!("Сеть: «{}» передаёт {:.1} МБ/с — больше всех остальных.", "Network: '{}' moves {:.1} MB/s - more than any other.", disp(g), n / 1e6));
                 }
             }
         }
         let high: Vec<String> = gs.iter().filter(|g| g.iter().any(|p| p.reasons.iter().any(|r| r.sev == 3))).map(|g| disp(g)).take(5).collect();
         if !high.is_empty() {
-            out.push(format!("Подозрительные процессы (высокая степень): {}. Наведите курсор на метку в колонке «Подозрительное» — там причина.", high.join(", ")));
+            out.push(tf!("Подозрительные процессы (высокая степень): {}. Наведите курсор на метку в колонке «Подозрительное» — там причина.", "Suspicious processes (high severity): {}. Hover the label in the 'Suspicious' column to see the reason.", high.join(", ")));
         }
         if self.cpu_total > 90.0 {
-            out.push("ЦП почти полностью занят — отсортируйте процессы по ЦП, чтобы увидеть виновника.".into());
+            out.push(t!("ЦП почти полностью занят — отсортируйте процессы по ЦП, чтобы увидеть виновника.", "CPU is almost fully used - sort processes by CPU to see the culprit.").into());
         }
         if out.is_empty() {
-            out.push("Всё в порядке: ни один процесс не потребляет заметно больше обычного.".into());
+            out.push(t!("Всё в порядке: ни один процесс не потребляет заметно больше обычного.", "All good: no process uses noticeably more than usual.").into());
         }
         out
     }

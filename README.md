@@ -27,7 +27,7 @@ In short: **85–99% faster or smaller in every size/speed test, and equal on id
 
 ## Install
 
-Download `WinRust.exe` from the [latest release](https://github.com/Lemxy/WinRust/releases/latest), run it as administrator and press "Install WinRust" (the installer window is currently in Russian; an English UI is on the roadmap). "Remove all" rolls everything back. Windows 10/11, x64.
+Download `WinRust.exe` from the [latest release](https://github.com/Lemxy/WinRust/releases/latest), run it as administrator and press "Install WinRust" (the installer is in English by default; the **Русский** button in its corner, or "Language" in the bar's right-click menu, switches to Russian, and the other WinRust programs pick the choice up when they start). "Remove all" rolls everything back. Windows 10/11, x64.
 
 > **Read this first.** WinRust disables Windows Search, replaces the taskbar and can replace the shell. The exe is not code-signed, so SmartScreen will warn. A restore point is created before install, but try it on a spare machine or a VM first.
 

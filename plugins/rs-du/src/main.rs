@@ -2,6 +2,8 @@
 // rs-du [X:] --clean --ask       numbered list by risk, asks what to clean, waits for Enter at the end (used by the topbar menu)
 // rs-du [X:] --clean [--apply [--all|--safe]]   list (or delete: default = green+yellow, --all = everything, --safe = green only)
 // rs-du [X:] --restore | --purge   bring quarantined files back | empty the quarantine now (it also empties itself after 30 days)
+#[macro_use]
+mod i18n;
 mod clean;
 mod mft;
 use mft::*;

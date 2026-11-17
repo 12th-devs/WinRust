@@ -221,7 +221,7 @@ impl App {
         g.unclip();
 
         if ui.rows.is_empty() {
-            let msg = if ui.search.is_empty() { "Нет данных" } else { "Ничего не найдено" };
+            let msg = if ui.search.is_empty() { t!("Нет данных", "No data") } else { t!("Ничего не найдено", "Nothing found") };
             g.text_center(R::new(area.l, area.t + g.px(30.0), area.r, area.t + g.px(70.0)), msg, Font::Ui, th.dim);
         }
 
@@ -266,7 +266,7 @@ impl App {
             let ctl = R::new(r.r - g.px(200.0), r.t, r.r - g.px(16.0), r.b);
             match id {
                 SettingId::Theme => {
-                    let seg = ["Светлая", "Тёмная", "Системная"];
+                    let seg = [t!("Светлая", "Light"), t!("Тёмная", "Dark"), t!("Системная", "System")];
                     let sw = ctl.w() / 3;
                     for (i, s) in seg.iter().enumerate() {
                         let sr = R::new(ctl.l + i as i32 * sw, r.t + g.px(14.0), ctl.l + (i as i32 + 1) * sw, r.b - g.px(14.0));
@@ -284,7 +284,7 @@ impl App {
                     let cx = if on { t.r - g.px(11.0) } else { t.l + g.px(11.0) };
                     g.round(R::new(cx - kn, t.t + g.px(10.0) - kn, cx + kn, t.t + g.px(10.0) + kn), kn, Some(if on { if th.dark { Rgb(0, 0, 0) } else { Rgb(255, 255, 255) } } else { th.dim }), None);
                     if !enabled {
-                        g.text_right(R::new(ctl.l, r.t, t.l - g.px(10.0), r.b), "нужен администратор", Font::Small, th.dim);
+                        g.text_right(R::new(ctl.l, r.t, t.l - g.px(10.0), r.b), t!("нужен администратор", "administrator needed"), Font::Small, th.dim);
                     }
                 }
             }
@@ -328,7 +328,7 @@ impl App {
         let block_h = ((m.h() as f64 * frac) as i32).max(g.px(180.0));
         let block = R::new(m.l, m.t + g.px(56.0), m.r, m.t + g.px(56.0) + block_h);
         self.draw_graph_block(g, it, block);
-        g.text(R::new(m.l, block.b + g.px(2.0), m.l + g.px(200.0), block.b + g.px(20.0)), "60 секунд", Font::Small, th.dim);
+        g.text(R::new(m.l, block.b + g.px(2.0), m.l + g.px(200.0), block.b + g.px(20.0)), t!("60 секунд", "60 seconds"), Font::Small, th.dim);
         g.text_right(R::new(m.r - g.px(100.0), block.b + g.px(2.0), m.r, block.b + g.px(20.0)), "0", Font::Small, th.dim);
         let mut y = block.b + g.px(30.0);
         if let Some((cap, segs)) = &it.composition {
@@ -448,11 +448,11 @@ pub enum SettingId {
 
 pub fn setting_text(id: SettingId) -> (&'static str, &'static str) {
     match id {
-        SettingId::Theme => ("Тема оформления", "Светлая, тёмная или как в системе"),
-        SettingId::Tray => ("Закрытие окна сворачивает в трей", "Программа продолжит собирать историю и применять правила; вернуть окно можно по Ctrl+Alt+T"),
-        SettingId::Autostart => ("Запускать при входе в Windows", "Сразу в трей, без окна"),
-        SettingId::Etw => ("Сеть по процессам", "Колонка «Сеть» в процессах (ETW). Требуются права администратора"),
-        SettingId::GpuTemp => ("Всегда читать температуру GPU", "Иначе температура читается только на странице GPU. Постоянный опрос может будить дискретную видеокарту ноутбука"),
+        SettingId::Theme => (t!("Тема оформления", "Theme"), t!("Светлая, тёмная или как в системе", "Light, dark or follow the system")),
+        SettingId::Tray => (t!("Закрытие окна сворачивает в трей", "Closing the window minimizes to tray"), t!("Программа продолжит собирать историю и применять правила; вернуть окно можно по Ctrl+Alt+T", "The program keeps collecting history and applying rules; bring the window back with Ctrl+Alt+T")),
+        SettingId::Autostart => (t!("Запускать при входе в Windows", "Start with Windows"), t!("Сразу в трей, без окна", "Straight to the tray, no window")),
+        SettingId::Etw => (t!("Сеть по процессам", "Per-process network"), t!("Колонка «Сеть» в процессах (ETW). Требуются права администратора", "'Network' column in Processes (ETW). Needs administrator rights")),
+        SettingId::GpuTemp => (t!("Всегда читать температуру GPU", "Always read GPU temperature"), t!("Иначе температура читается только на странице GPU. Постоянный опрос может будить дискретную видеокарту ноутбука", "Otherwise the temperature is read only on the GPU page. Constant polling can wake a laptop's discrete GPU")),
     }
 }
 
@@ -516,11 +516,11 @@ pub struct PerfItem<'a> {
 }
 
 fn gb(b: u64) -> String {
-    format!("{} ГБ", dec(b as f64 / 1_073_741_824.0, 1))
+    tf!("{} ГБ", "{} GB", dec(b as f64 / 1_073_741_824.0, 1))
 }
 
 fn mb_cache(b: u64) -> String {
-    if b >= 1 << 20 { format!("{} МБ", dec(b as f64 / 1_048_576.0, 1)) } else { format!("{} КБ", b >> 10) }
+    if b >= 1 << 20 { tf!("{} МБ", "{} MB", dec(b as f64 / 1_048_576.0, 1)) } else { tf!("{} КБ", "{} KB", b >> 10) }
 }
 
 /// Название подключения по имени адаптера: «Wi-Fi», «Ethernet», «Bluetooth» …
@@ -531,7 +531,7 @@ pub fn conn_name(adapter: &str) -> &'static str {
     } else if l.contains("bluetooth") {
         "Bluetooth"
     } else if l.contains("vmware") || l.contains("virtual") || l.contains("hyper-v") || l.contains("vethernet") || l.contains("vpn") || l.contains("tap-") {
-        "Виртуальный адаптер"
+        t!("Виртуальный адаптер", "Virtual adapter")
     } else {
         "Ethernet"
     }
@@ -548,7 +548,7 @@ pub fn perf_items(d: &Data) -> Vec<PerfItem<'_>> {
     let used = d.sys.used_memory();
     let cpu_brand = d.sys.cpus().first().map_or(String::new(), |c| c.brand().to_string());
     let m = &d.meminfo;
-    let ms = |x: f64| format!("{} МБ/с", dec(x / 1_048_576.0, 1));
+    let ms = |x: f64| tf!("{} МБ/с", "{} MB/s", dec(x / 1_048_576.0, 1));
     let gspec = |label: &str, right: &str, q, color, ymax| GraphSpec { label: label.into(), right: right.into(), series: vec![(q, color)], ymax };
     let kinds = perf_kinds(d);
     let mut v = vec![];
@@ -571,31 +571,31 @@ pub fn perf_items(d: &Data) -> Vec<PerfItem<'_>> {
         match kind {
             PerfKind::Cpu => v.push(PerfItem {
                 kind,
-                title: "ЦП".into(),
-                line1: format!("{:.0}%  {} ГГц", last(&s.cpu), dec(speed as f64, 2)),
+                title: t!("ЦП", "CPU").into(),
+                line1: tf!("{:.0}%  {} ГГц", "{:.0}%  {} GHz", last(&s.cpu), dec(speed as f64, 2)),
                 line2: String::new(),
-                graphs: vec![gspec("% использования", "100%", &s.cpu, col(0), 100.0)],
+                graphs: vec![gspec(t!("% использования", "% utilization"), "100%", &s.cpu, col(0), 100.0)],
                 layout: GLayout::Single,
-                big_title: "ЦП".into(),
+                big_title: t!("ЦП", "CPU").into(),
                 device: cpu_brand.clone(),
                 stats: vec![
-                    ("Использование".into(), format!("{:.0}%", last(&s.cpu))),
-                    ("Скорость".into(), format!("{} ГГц", dec(speed as f64, 2))),
-                    ("Процессы".into(), m.processes.to_string()),
-                    ("Потоки".into(), m.threads.to_string()),
-                    ("Дескрипторы".into(), m.handles.to_string()),
-                    ("Время работы".into(), fmt_uptime(crate::perf::uptime_secs())),
+                    (t!("Использование", "Utilization").into(), format!("{:.0}%", last(&s.cpu))),
+                    (t!("Скорость", "Speed").into(), tf!("{} ГГц", "{} GHz", dec(speed as f64, 2))),
+                    (t!("Процессы", "Processes").into(), m.processes.to_string()),
+                    (t!("Потоки", "Threads").into(), m.threads.to_string()),
+                    (t!("Дескрипторы", "Handles").into(), m.handles.to_string()),
+                    (t!("Время работы", "Up time").into(), fmt_uptime(crate::perf::uptime_secs())),
                 ],
                 stat_cols: 2,
                 facts: vec![
-                    ("Базовая скорость:".into(), format!("{} ГГц", dec(si.base_mhz as f64 / 1000.0, 2))),
-                    ("Сокетов:".into(), si.sockets.to_string()),
-                    ("Ядер:".into(), sysinfo::System::physical_core_count().unwrap_or(0).to_string()),
-                    ("Логических процессоров:".into(), d.sys.cpus().len().to_string()),
-                    ("Виртуализация:".into(), if si.virt { "Включено" } else { "Отключено" }.into()),
-                    ("Кэш L1:".into(), mb_cache(si.l1)),
-                    ("Кэш L2:".into(), mb_cache(si.l2)),
-                    ("Кэш L3:".into(), mb_cache(si.l3)),
+                    (t!("Базовая скорость:", "Base speed:").into(), tf!("{} ГГц", "{} GHz", dec(si.base_mhz as f64 / 1000.0, 2))),
+                    (t!("Сокетов:", "Sockets:").into(), si.sockets.to_string()),
+                    (t!("Ядер:", "Cores:").into(), sysinfo::System::physical_core_count().unwrap_or(0).to_string()),
+                    (t!("Логических процессоров:", "Logical processors:").into(), d.sys.cpus().len().to_string()),
+                    (t!("Виртуализация:", "Virtualization:").into(), if si.virt { t!("Включено", "Enabled") } else { t!("Отключено", "Disabled") }.into()),
+                    (t!("Кэш L1:", "L1 cache:").into(), mb_cache(si.l1)),
+                    (t!("Кэш L2:", "L2 cache:").into(), mb_cache(si.l2)),
+                    (t!("Кэш L3:", "L3 cache:").into(), mb_cache(si.l3)),
                 ],
                 composition: None,
             }),
@@ -609,52 +609,52 @@ pub fn perf_items(d: &Data) -> Vec<PerfItem<'_>> {
                 let cached = if d.sample.mem_modified + d.sample.mem_standby > 0 { d.sample.mem_modified + d.sample.mem_standby } else { m.cache };
                 let mut facts: Vec<(String, String)> = vec![];
                 if !mh.dimms.is_empty() {
-                    facts.push(("Скорость:".into(), format!("{} МТ/с", mh.speed())));
-                    facts.push(("Использовано слотов:".into(), format!("{} из {}", mh.dimms.len(), mh.slots.max(mh.dimms.len() as u32))));
-                    facts.push(("Форм-фактор:".into(), mh.form().into()));
-                    facts.push(("Зарезервировано аппаратурой:".into(), format!("{} МБ", dec(reserved as f64 / 1_048_576.0, 0))));
+                    facts.push((t!("Скорость:", "Speed:").into(), tf!("{} МТ/с", "{} MT/s", mh.speed())));
+                    facts.push((t!("Использовано слотов:", "Slots used:").into(), tf!("{} из {}", "{} of {}", mh.dimms.len(), mh.slots.max(mh.dimms.len() as u32))));
+                    facts.push((t!("Форм-фактор:", "Form factor:").into(), mh.form().into()));
+                    facts.push((t!("Зарезервировано аппаратурой:", "Hardware reserved:").into(), tf!("{} МБ", "{} MB", dec(reserved as f64 / 1_048_576.0, 0))));
                     if !kind_txt.is_empty() {
-                        facts.push(("Тип:".into(), kind_txt.into()));
+                        facts.push((t!("Тип:", "Type:").into(), kind_txt.into()));
                     }
                     if let Some(d0) = mh.dimms.first().filter(|x| !x.mfr.is_empty()) {
-                        facts.push(("Производитель:".into(), d0.mfr.clone()));
+                        facts.push((t!("Производитель:", "Manufacturer:").into(), d0.mfr.clone()));
                     }
                 }
                 let t = total.max(1) as f32;
                 let (mut seg, mut parts): (Vec<(f32, Rgb)>, Vec<String>) = (vec![], vec![]);
                 seg.push((used as f32 / t, col(1)));
-                parts.push(format!("Используется {}", gb(used)));
+                parts.push(tf!("Используется {}", "In use {}", gb(used)));
                 if d.sample.mem_modified > 0 {
                     seg.push((d.sample.mem_modified as f32 / t, col(1).lerp(Rgb(255, 255, 255), 0.25)));
-                    parts.push(format!("Изменено {}", gb(d.sample.mem_modified)));
+                    parts.push(tf!("Изменено {}", "Modified {}", gb(d.sample.mem_modified)));
                 }
                 if d.sample.mem_standby > 0 {
                     seg.push(((d.sample.mem_standby.min(avail)) as f32 / t, col(1).lerp(Rgb(128, 128, 128), 0.6)));
-                    parts.push(format!("В режиме ожидания {}", gb(d.sample.mem_standby)));
+                    parts.push(tf!("В режиме ожидания {}", "Standby {}", gb(d.sample.mem_standby)));
                 }
                 if d.sample.mem_free > 0 {
-                    parts.push(format!("Свободно {}", gb(d.sample.mem_free)));
+                    parts.push(tf!("Свободно {}", "Free {}", gb(d.sample.mem_free)));
                 }
                 v.push(PerfItem {
                     kind,
-                    title: "Память".into(),
+                    title: t!("Память", "Memory").into(),
                     line1: format!("{}/{} ({:.0}%)", dec(used as f64 / 1_073_741_824.0, 1), gb(total), d.mem_pct),
                     line2: String::new(),
-                    graphs: vec![gspec("Использование памяти", &gb(total), &s.mem, col(1), 100.0)],
+                    graphs: vec![gspec(t!("Использование памяти", "Memory usage"), &gb(total), &s.mem, col(1), 100.0)],
                     layout: GLayout::Single,
-                    big_title: "Память".into(),
+                    big_title: t!("Память", "Memory").into(),
                     device: if kind_txt.is_empty() { gb(total) } else { format!("{} {}", gb(total), kind_txt) },
                     stats: vec![
-                        (if compressed > 0 { "Используется (сжато)" } else { "Используется" }.into(), if compressed > 0 { format!("{} ({})", gb(used), gb(compressed)) } else { gb(used) }),
-                        ("Доступно".into(), gb(avail)),
-                        ("Выделено".into(), format!("{}/{}", dec(m.commit_total as f64 / 1_073_741_824.0, 1), gb(m.commit_limit))),
-                        ("Кэшировано".into(), gb(cached)),
-                        ("Выгружаемый пул".into(), format!("{} МБ", dec(m.paged as f64 / 1_048_576.0, 0))),
-                        ("Невыгружаемый пул".into(), format!("{} МБ", dec(m.nonpaged as f64 / 1_048_576.0, 0))),
+                        (if compressed > 0 { t!("Используется (сжато)", "In use (compressed)") } else { t!("Используется", "In use") }.into(), if compressed > 0 { format!("{} ({})", gb(used), gb(compressed)) } else { gb(used) }),
+                        (t!("Доступно", "Available").into(), gb(avail)),
+                        (t!("Выделено", "Committed").into(), format!("{}/{}", dec(m.commit_total as f64 / 1_073_741_824.0, 1), gb(m.commit_limit))),
+                        (t!("Кэшировано", "Cached").into(), gb(cached)),
+                        (t!("Выгружаемый пул", "Paged pool").into(), tf!("{} МБ", "{} MB", dec(m.paged as f64 / 1_048_576.0, 0))),
+                        (t!("Невыгружаемый пул", "Non-paged pool").into(), tf!("{} МБ", "{} MB", dec(m.nonpaged as f64 / 1_048_576.0, 0))),
                     ],
                     stat_cols: 2,
                     facts,
-                    composition: Some((format!("Состав памяти: {}", parts.join(" · ")), seg)),
+                    composition: Some((tf!("Состав памяти: {}", "Memory composition: {}", parts.join(" · ")), seg)),
                 });
             }
 
@@ -668,34 +668,34 @@ pub fn perf_items(d: &Data) -> Vec<PerfItem<'_>> {
                     ("", b) => b.to_string(),
                     (k, b) => format!("{k} ({b})"),
                 };
-                let title = format!("Диск {} ({})", dk.number, dk.letters.trim());
+                let title = tf!("Диск {} ({})", "Disk {} ({})", dk.number, dk.letters.trim());
                 let xfer_max = dk.s_rd.iter().chain(dk.s_wr.iter()).cloned().fold(1.0f32, f32::max) * 1.15;
                 let system = dk.letters.to_uppercase().contains("C:");
                 v.push(PerfItem {
                     kind,
                     title: title.clone(),
-                    line1: if info.kind.is_empty() { "Локальный диск".into() } else { kind_txt.clone() },
+                    line1: if info.kind.is_empty() { t!("Локальный диск", "Local disk").into() } else { kind_txt.clone() },
                     line2: format!("{:.0}%", dk.active),
                     graphs: vec![
-                        gspec("Время активности", "100%", &dk.s_active, col(2), 100.0),
-                        GraphSpec { label: "Скорость передачи данных".into(), right: format!("{} МБ/с", dec(xfer_max as f64, 0)), series: vec![(&dk.s_rd, col(2)), (&dk.s_wr, col(2).lerp(Rgb(255, 255, 255), 0.45))], ymax: xfer_max },
+                        gspec(t!("Время активности", "Active time"), "100%", &dk.s_active, col(2), 100.0),
+                        GraphSpec { label: t!("Скорость передачи данных", "Transfer rate").into(), right: tf!("{} МБ/с", "{} MB/s", dec(xfer_max as f64, 0)), series: vec![(&dk.s_rd, col(2)), (&dk.s_wr, col(2).lerp(Rgb(255, 255, 255), 0.45))], ymax: xfer_max },
                     ],
                     layout: GLayout::Stack,
                     big_title: title,
                     device: model,
                     stats: vec![
-                        ("Время активности".into(), format!("{:.0}%", dk.active)),
-                        ("Средний отклик".into(), format!("{} мс", dec(dk.ms as f64, 1))),
-                        ("Скорость чтения".into(), ms(dk.rd)),
-                        ("Скорость записи".into(), ms(dk.wr)),
+                        (t!("Время активности", "Active time").into(), format!("{:.0}%", dk.active)),
+                        (t!("Средний отклик", "Average response time").into(), tf!("{} мс", "{} ms", dec(dk.ms as f64, 1))),
+                        (t!("Скорость чтения", "Read speed").into(), ms(dk.rd)),
+                        (t!("Скорость записи", "Write speed").into(), ms(dk.wr)),
                     ],
                     stat_cols: 2,
                     facts: vec![
-                        ("Ёмкость:".into(), gb(info.capacity.max(dk.formatted))),
-                        ("Форматированный объём:".into(), gb(dk.formatted)),
-                        ("Системный диск:".into(), if system { "Да" } else { "Нет" }.into()),
-                        ("Файл подкачки:".into(), if system { "Да" } else { "Нет" }.into()),
-                        ("Тип:".into(), kind_txt),
+                        (t!("Ёмкость:", "Capacity:").into(), gb(info.capacity.max(dk.formatted))),
+                        (t!("Форматированный объём:", "Formatted:").into(), gb(dk.formatted)),
+                        (t!("Системный диск:", "System disk:").into(), if system { t!("Да", "Yes") } else { t!("Нет", "No") }.into()),
+                        (t!("Файл подкачки:", "Page file:").into(), if system { t!("Да", "Yes") } else { t!("Нет", "No") }.into()),
+                        (t!("Тип:", "Type:").into(), kind_txt),
                     ],
                     composition: None,
                 });
@@ -711,14 +711,14 @@ pub fn perf_items(d: &Data) -> Vec<PerfItem<'_>> {
                     kind,
                     title: title.clone(),
                     line1: conn.into(),
-                    line2: format!("О: {} П: {} Кбит/с", tx as i64, rx as i64),
-                    graphs: vec![GraphSpec { label: "Пропускная способность".into(), right: format!("{} Кбит/с", ymax as i64), series: vec![(&n.s_rx, col(3)), (&n.s_tx, col(3).lerp(Rgb(255, 255, 255), 0.4))], ymax }],
+                    line2: tf!("О: {} П: {} Кбит/с", "S: {} R: {} Kbps", tx as i64, rx as i64),
+                    graphs: vec![GraphSpec { label: t!("Пропускная способность", "Throughput").into(), right: tf!("{} Кбит/с", "{} Kbps", ymax as i64), series: vec![(&n.s_rx, col(3)), (&n.s_tx, col(3).lerp(Rgb(255, 255, 255), 0.4))], ymax }],
                     layout: GLayout::Single,
                     big_title: title,
                     device: n.name.clone(),
-                    stats: vec![("Отправка".into(), format!("{} Кбит/с", tx as i64)), ("Получение".into(), format!("{} Кбит/с", rx as i64))],
+                    stats: vec![(t!("Отправка", "Send").into(), tf!("{} Кбит/с", "{} Kbps", tx as i64)), (t!("Получение", "Receive").into(), tf!("{} Кбит/с", "{} Kbps", rx as i64))],
                     stat_cols: 2,
-                    facts: vec![("Имя адаптера:".into(), n.name.clone()), ("Тип подключения:".into(), conn.into()), ("Скорость канала:".into(), format!("{:.0} Мбит/с", n.bw / 1e6))],
+                    facts: vec![(t!("Имя адаптера:", "Adapter name:").into(), n.name.clone()), (t!("Тип подключения:", "Connection type:").into(), conn.into()), (t!("Скорость канала:", "Link speed:").into(), tf!("{:.0} Мбит/с", "{:.0} Mbps", n.bw / 1e6))],
                     composition: None,
                 });
             }
@@ -742,30 +742,30 @@ pub fn perf_items(d: &Data) -> Vec<PerfItem<'_>> {
                     },
                     graphs: vec![
                         gspec("3D", "100%", &g.series.g3d, col(4), 100.0),
-                        gspec("Копирование", "100%", &g.series.gcopy, col(4), 100.0),
-                        gspec("Видеокодирование", "100%", &g.series.genc, col(4), 100.0),
-                        gspec("Видеодекодирование", "100%", &g.series.gdec, col(4), 100.0),
-                        gspec("Использование выделенной памяти GPU", &gb(vram), &g.series.ded, col(4), vram_mb),
-                        gspec("Использование общей памяти GPU", &gb(shared_total), &g.series.shr, col(4), (shared_total >> 20).max(1) as f32),
+                        gspec(t!("Копирование", "Copy"), "100%", &g.series.gcopy, col(4), 100.0),
+                        gspec(t!("Видеокодирование", "Video encode"), "100%", &g.series.genc, col(4), 100.0),
+                        gspec(t!("Видеодекодирование", "Video decode"), "100%", &g.series.gdec, col(4), 100.0),
+                        gspec(t!("Использование выделенной памяти GPU", "Dedicated GPU memory usage"), &gb(vram), &g.series.ded, col(4), vram_mb),
+                        gspec(t!("Использование общей памяти GPU", "Shared GPU memory usage"), &gb(shared_total), &g.series.shr, col(4), (shared_total >> 20).max(1) as f32),
                     ],
                     layout: GLayout::Grid,
                     big_title: title,
                     device: name.clone(),
                     stats: vec![
-                        ("Использование".into(), format!("{:.0}%", g.util)),
-                        ("Общая память GPU".into(), format!("{}/{}", dec(g.shr_used as f64 / 1_073_741_824.0, 1), gb(shared_total))),
-                        ("Память GPU".into(), format!("{}/{}", dec((g.ded_used + g.shr_used) as f64 / 1_073_741_824.0, 1), gb(vram + shared_total))),
-                        ("Температура GPU".into(), temp.clone().unwrap_or_else(|| "—".into())),
+                        (t!("Использование", "Utilization").into(), format!("{:.0}%", g.util)),
+                        (t!("Общая память GPU", "Shared GPU memory").into(), format!("{}/{}", dec(g.shr_used as f64 / 1_073_741_824.0, 1), gb(shared_total))),
+                        (t!("Память GPU", "GPU memory").into(), format!("{}/{}", dec((g.ded_used + g.shr_used) as f64 / 1_073_741_824.0, 1), gb(vram + shared_total))),
+                        (t!("Температура GPU", "GPU temperature").into(), temp.clone().unwrap_or_else(|| "—".into())),
                     ],
                     stat_cols: 2,
                     facts: {
                         let dash = |s: &str| if s.is_empty() { "—".to_string() } else { s.to_string() };
                         vec![
-                            ("Выделенная память GPU:".into(), format!("{}/{}", dec(g.ded_used as f64 / 1_073_741_824.0, 1), gb(vram))),
-                            ("Версия драйвера:".into(), dash(&g.reg.driver_version)),
-                            ("Дата разработки:".into(), if g.reg.driver_date.is_empty() { "—".into() } else { ru_date(&g.reg.driver_date) }),
-                            ("Версия DirectX:".into(), dash(&a.dx)),
-                            ("Физическое расположение:".into(), dash(&a.location)),
+                            (t!("Выделенная память GPU:", "Dedicated GPU memory:").into(), format!("{}/{}", dec(g.ded_used as f64 / 1_073_741_824.0, 1), gb(vram))),
+                            (t!("Версия драйвера:", "Driver version:").into(), dash(&g.reg.driver_version)),
+                            (t!("Дата разработки:", "Driver date:").into(), if g.reg.driver_date.is_empty() { "—".into() } else { ru_date(&g.reg.driver_date) }),
+                            (t!("Версия DirectX:", "DirectX version:").into(), dash(&a.dx)),
+                            (t!("Физическое расположение:", "Physical location:").into(), dash(&a.location)),
                         ]
                     },
                     composition: None,

@@ -22,18 +22,18 @@ pub enum Sig {
 
 pub fn label(sev: u8) -> &'static str {
     match sev {
-        3 => "⚠ Высокая",
-        2 => "▲ Средняя",
-        1 => "● Низкая",
+        3 => t!("⚠ Высокая", "⚠ High"),
+        2 => t!("▲ Средняя", "▲ Medium"),
+        1 => t!("● Низкая", "● Low"),
         _ => "",
     }
 }
 
 pub fn sev_word(sev: u8) -> &'static str {
     match sev {
-        3 => "Высокая",
-        2 => "Средняя",
-        _ => "Низкая",
+        3 => t!("Высокая", "High"),
+        2 => t!("Средняя", "Medium"),
+        _ => t!("Низкая", "Low"),
     }
 }
 
@@ -44,12 +44,12 @@ const SYSTEM_NAMES: [&str; 12] = [
 ];
 
 /// Папки, откуда легитимные программы обычно не работают постоянно.
-const RISKY_DIRS: [(&str, &str); 4] = [
-    (r"\temp\", "временной папки"),
-    (r"\downloads\", "папки «Загрузки»"),
-    (r"\$recycle.bin\", "корзины"),
-    (r"\users\public\", "общей папки Public"),
-];
+static RISKY_DIRS: std::sync::LazyLock<[(&'static str, &'static str); 4]> = std::sync::LazyLock::new(|| [
+    (r"\temp\", t!("временной папки", "a temporary folder")),
+    (r"\downloads\", t!("папки «Загрузки»", "the Downloads folder")),
+    (r"\$recycle.bin\", t!("корзины", "the Recycle Bin")),
+    (r"\users\public\", t!("общей папки Public", "the shared Public folder")),
+]);
 
 pub struct Facts<'a> {
     pub name: &'a str,
@@ -75,27 +75,27 @@ pub fn assess(f: &Facts) -> Vec<Reason> {
         let e = exe.to_lowercase().replace('/', "\\");
         let in_windows = e.starts_with(&f.windir.to_lowercase());
         if SYSTEM_NAMES.contains(&name.as_str()) && !in_windows {
-            add(3, format!("Имя совпадает с системным процессом «{}», но файл лежит не в папке Windows: {}", f.name, short(exe)));
+            add(3, tf!("Имя совпадает с системным процессом «{}», но файл лежит не в папке Windows: {}", "The name matches the system process '{}' but the file is not in the Windows folder: {}", f.name, short(exe)));
         }
         if !f.exists {
-            add(3, "Файла процесса нет на диске — его удалили после запуска (так ведёт себя вредоносный код, а иногда и установщики)".into());
+            add(3, t!("Файла процесса нет на диске — его удалили после запуска (так ведёт себя вредоносный код, а иногда и установщики)", "The process file is gone from disk - it was deleted after launch (malware does this, and sometimes installers)").into());
         }
         let risky = RISKY_DIRS.iter().find(|(d, _)| e.contains(d));
         if let Some((_, what)) = risky {
-            add(2, format!("Запущен из {what}: {} — постоянные программы обычно стоят в Program Files или AppData\\Local\\Programs", short(exe)));
+            add(2, tf!("Запущен из {what}: {} — постоянные программы обычно стоят в Program Files или AppData\\Local\\Programs", "Started from {what}: {} - permanent programs usually live in Program Files or AppData\\Local\\Programs", short(exe)));
         }
         if !in_windows {
             match f.sig {
-                Sig::Invalid => add(2, "Цифровая подпись файла недействительна или не вызывает доверия".into()),
-                Sig::Unsigned if risky.is_some() => add(2, "Файл не подписан, а запущен из временной или пользовательской папки".into()),
-                Sig::Unsigned => add(1, "Файл не имеет цифровой подписи (издатель не подтверждён) — для самописных и портативных программ это нормально".into()),
+                Sig::Invalid => add(2, t!("Цифровая подпись файла недействительна или не вызывает доверия", "The file's digital signature is invalid or not trusted").into()),
+                Sig::Unsigned if risky.is_some() => add(2, t!("Файл не подписан, а запущен из временной или пользовательской папки", "The file is unsigned and runs from a temporary or user folder").into()),
+                Sig::Unsigned => add(1, t!("Файл не имеет цифровой подписи (издатель не подтверждён) — для самописных и портативных программ это нормально", "The file has no digital signature (publisher not verified) - normal for home-made and portable programs").into()),
                 _ => {}
             }
         }
     }
     match (name.as_str(), parent.as_deref()) {
-        ("svchost.exe", Some(p)) if p != "services.exe" => add(3, format!("svchost.exe запущен не службой services.exe, а процессом «{}»", f.parent.unwrap_or(""))),
-        ("lsass.exe", Some(p)) if p != "wininit.exe" => add(3, format!("lsass.exe запущен не wininit.exe, а процессом «{}»", f.parent.unwrap_or(""))),
+        ("svchost.exe", Some(p)) if p != "services.exe" => add(3, tf!("svchost.exe запущен не службой services.exe, а процессом «{}»", "svchost.exe was started not by services.exe but by the process '{}'", f.parent.unwrap_or(""))),
+        ("lsass.exe", Some(p)) if p != "wininit.exe" => add(3, tf!("lsass.exe запущен не wininit.exe, а процессом «{}»", "lsass.exe was started not by wininit.exe but by the process '{}'", f.parent.unwrap_or(""))),
         _ => {}
     }
     out.sort_by_key(|r| std::cmp::Reverse(r.sev));

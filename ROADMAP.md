@@ -3,6 +3,7 @@
 (Русская версия: [ROADMAP.ru.md](ROADMAP.ru.md))
 
 ## Done
+- **English by default + a language switch**: every program (installer, topbar, task manager, disk cleaner) is in English; a Русский/English button in the installer window and a "Language" item in the bar's menu switch it. The choice is stored in `%ProgramData%\WinRust\lang.txt` and read when a program starts. Texts are written as pairs in the code (`t!("русский", "english")`, `tf!` for format strings; `src/i18n.rs` is identical in each crate); unit tests run in Russian. Only built and unit-tested, the windows were not walked through by hand.
 - A Win32/GDI window in the rtaskmgr-win32 style (dark theme, plugin cards).
 - Plugins embedded into one `plugin-launcher.exe` (unpacked into Program Files, not %TEMP%), static CRT.
 - **rust-search**: an NTFS search service + Alt+Space; disables WSearch and the taskbar search box.
@@ -20,7 +21,6 @@
 
 ## Next (in order)
 1. **Test on a clean Windows 11** (VM): install, uninstall, rollback, reboot. Nothing has been checked on another machine so far.
-2. **English UI** for the installer window (the strings are Russian today).
 3. **chrome-rs**: a real install instead of the placeholder (once the browser is ready; see `plugins/chrome-rs/ROADMAP.md`).
 4. **PowerShell profile**: optionally install rg/fd/bat/eza/zoxide through winget with a separate checkbox in the topbar settings (the block is silent without them today); check the pwsh 7 write on a machine that has it.
 5. **Releases**: GitHub Releases (first one is out), SHA-256 next to it, version in the window, update check.
