@@ -68,3 +68,18 @@ plugin-launcher rollback --yes
 
 ## Новый плагин
 Одна запись в `PLUGINS` (`src/main.rs`): имя, описание, предупреждение, `installed`, пара функций install/uninstall и значок `glyph`. Окно, высота списка и CLI подхватят её сами.
+
+## Снимки экрана
+
+**Панель задач (английский)**
+
+![Панель задач на рабочем столе](docs/screenshots/taskbar.webp)
+![Меню панели задач](docs/screenshots/taskbar-menu.png)
+
+**Диспетчер задач** (русский интерфейс)
+
+![Диспетчер задач](docs/screenshots/task-manager.webp)
+
+**Проводник**
+
+![Проводник](docs/screenshots/explorer.png)

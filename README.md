@@ -73,3 +73,18 @@ Exit codes: 0 success, 1 error, 2 bad arguments or no `--yes`. With no arguments
 
 ## New plugin
 One entry in `PLUGINS` (`src/main.rs`): name, description, warning, `installed`, an install/uninstall function pair and a `glyph` icon. The window, the list height and the CLI pick it up on their own.
+
+## Screenshots
+
+**Taskbar (English)**
+
+![Taskbar on the desktop](docs/screenshots/taskbar.webp)
+![Taskbar start menu](docs/screenshots/taskbar-menu.png)
+
+**Task manager** (Russian UI)
+
+![Task manager](docs/screenshots/task-manager.webp)
+
+**File explorer**
+
+![File explorer](docs/screenshots/explorer.png)
