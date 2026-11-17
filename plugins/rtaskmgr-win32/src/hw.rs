@@ -396,6 +396,9 @@ mod tests {
 
     #[test]
     fn real_hardware_is_readable() {
+        if std::env::var_os("CI").is_some() {
+            return; // GitHub's VMs vary: virtual disks without a type, no GPU memory; this checks real machines
+        }
         let m = memory_hw();
         assert!(m.installed_mb() >= 1024, "память из SMBIOS: {m:?}");
         assert!(m.slots >= m.dimms.len() as u32);
@@ -407,8 +410,7 @@ mod tests {
         let g = gpu_registry(&crate::perf::static_info().gpu_name);
         eprintln!("GPU reg: {:?}", g);
         assert!(!g.driver_version.is_empty(), "{g:?}");
-        // CI VMs report a basic display adapter with no video memory
-        if !crate::perf::static_info().gpu_name.is_empty() && std::env::var_os("CI").is_none() {
+        if !crate::perf::static_info().gpu_name.is_empty() {
             assert!(g.vram > 512 * 1024 * 1024, "видеопамять не прочиталась: {g:?}");
         }
         if let Some(n) = Nvml::new() {
