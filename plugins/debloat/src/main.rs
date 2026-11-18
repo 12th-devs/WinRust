@@ -83,9 +83,8 @@ fn parse_val(ok: bool, out: &str) -> Val {
     if !ok {
         return Val::Missing;
     }
-    match out.lines().find(|l| l.contains("REG_")) {
-        Some(l) if l.contains("REG_DWORD") => l.split_whitespace().last().and_then(|t| u32::from_str_radix(t.trim_start_matches("0x"), 16).ok()).map_or(Val::Other, Val::Dword),
-        Some(_) => Val::Other,
+    match winrust_common::reg::value(out) {
+        Some(_) => winrust_common::reg::dword(out).map_or(Val::Other, Val::Dword),
         None => Val::Missing,
     }
 }

@@ -47,28 +47,27 @@ pub(crate) fn install() -> Result<(), String> {
 }
 
 pub(crate) fn uninstall() -> Result<(), String> {
-    with_payload(&["rs.exe"], |src| {
-        let _ = run("taskkill", &["/f", "/im", "rs-launcher.exe"]);
-        let _ = run("reg", &["delete", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "rs-launcher", "/f"]);
-        // run the unpacked copy: an exe cannot delete itself, so the installed one would leave its folder behind
-        run(src.join("rs.exe").to_str().unwrap(), &["--uninstall"])?;
-        let _ = fs::remove_dir_all(prog_dir());
-        let _ = run("reg", &["delete", SH_KEY, "/v", "Debugger", "/f"]);
-        // no saved values (installed by an older launcher): the Windows defaults
-        let mode = match (reg_dword(STATE, "WSearchStart"), reg_dword(STATE, "WSearchDelayed")) {
-            (Some(2), Some(0)) => "auto",
-            (Some(3), _) => "demand",
-            (Some(4), _) => "disabled",
-            _ => "delayed-auto",
-        };
-        run("sc.exe", &["config", "WSearch", "start=", mode])?;
-        if mode.ends_with("auto") {
-            let _ = run("sc.exe", &["start", "WSearch"]);
-        }
-        let r = taskbar_search(reg_dword(STATE, "SearchboxMode").unwrap_or(2));
-        if r.is_ok() {
-            let _ = run("reg", &["delete", STATE, "/f"]);
-        }
-        r
-    })
+    let _ = run("taskkill", &["/f", "/im", "rs-launcher.exe"]);
+    let _ = run("reg", &["delete", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "rs-launcher", "/f"]);
+    // Windows Search back first: a failure removing our files below must not leave it switched off
+    let _ = run("reg", &["delete", SH_KEY, "/v", "Debugger", "/f"]);
+    // no saved values (installed by an older launcher): the Windows defaults
+    let mode = match (reg_dword(STATE, "WSearchStart"), reg_dword(STATE, "WSearchDelayed")) {
+        (Some(2), Some(0)) => "auto",
+        (Some(3), _) => "demand",
+        (Some(4), _) => "disabled",
+        _ => "delayed-auto",
+    };
+    let svc = run("sc.exe", &["config", "WSearch", "start=", mode]);
+    if svc.is_ok() && mode.ends_with("auto") {
+        let _ = run("sc.exe", &["start", "WSearch"]);
+    }
+    let r = svc.and(taskbar_search(reg_dword(STATE, "SearchboxMode").unwrap_or(2)));
+    if r.is_ok() {
+        let _ = run("reg", &["delete", STATE, "/f"]);
+    }
+    // run the unpacked copy: an exe cannot delete itself, so the installed one would leave its folder behind
+    let files = with_payload(&["rs.exe"], |src| run(src.join("rs.exe").to_str().unwrap(), &["--uninstall"]));
+    let _ = fs::remove_dir_all(prog_dir());
+    r.and(files)
 }

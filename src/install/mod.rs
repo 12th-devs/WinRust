@@ -30,8 +30,21 @@ pub(crate) fn soft(what: &str, r: Result<(), String>) {
     }
 }
 
+pub(crate) fn program_data() -> PathBuf {
+    PathBuf::from(env::var("ProgramData").unwrap_or_else(|_| r"C:\ProgramData".into()))
+}
+
+/// Start Menu shortcut: search and the bar's Start panel list Start Menu shortcuts only.
+pub(crate) fn start_lnk(name: &str) -> PathBuf {
+    program_data().join(format!(r"Microsoft\Windows\Start Menu\Programs\{name}.lnk"))
+}
+
+pub(crate) fn shortcut(lnk: &Path, target: &Path, args: &str) -> Result<(), String> {
+    run("powershell", &["-NoProfile", "-Command", &format!("$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{}'); $s.TargetPath='{}'; $s.Arguments='{args}'; $s.Save()", lnk.display(), target.display())])
+}
+
 pub(crate) fn log(s: &str) {
-    let d = PathBuf::from(env::var("ProgramData").unwrap_or_else(|_| r"C:\ProgramData".into())).join("plugin-launcher");
+    let d = program_data().join("plugin-launcher");
     let _ = fs::create_dir_all(&d);
     if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(d.join("install.log")) {
         let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
@@ -53,19 +66,23 @@ pub(crate) fn put(src: &Path, dst: &Path) -> Result<(), String> {
 }
 
 pub(crate) fn reg_dword(key: &str, name: &str) -> Option<u32> {
-    let o = out("reg", &["query", key, "/v", name]).ok()?;
-    let t = o.lines().find(|l| l.contains("REG_DWORD"))?.split_whitespace().last()?;
-    u32::from_str_radix(t.trim_start_matches("0x"), 16).ok()
+    i18n::reg::dword(&out("reg", &["query", key, "/v", name]).ok()?)
+}
+
+/// A REG_SZ (or any string-like) value as text.
+pub(crate) fn reg_str(key: &str, name: &str) -> Option<String> {
+    i18n::reg::value(&out("reg", &["query", key, "/v", name]).ok()?).map(|(_, d)| d.to_string())
 }
 
 include!(concat!(env!("OUT_DIR"), "/payload.rs")); // PAYLOAD: the exes listed in payload.txt, embedded by build.rs
 
 /// Update without rebuilding the launcher: an exe in `payload\` next to this one (or two levels up, the cargo
-/// target\release layout) wins over the embedded copy. Trust level = the launcher exe's own folder.
+/// target\release layout) wins over the embedded copy. Trust level = the launcher exe's own folder. Two levels up only from
+/// target\release: from C:\Program Files\WinRust it would be C:\payload, which any user may create.
 pub(crate) fn disk_payload() -> Option<PathBuf> {
     let exe = env::current_exe().ok()?;
     let d = exe.parent()?;
-    [d.join("payload"), d.join(r"..\..\payload")].into_iter().find(|p| p.is_dir())
+    [Some(d.join("payload")), d.ends_with(r"target\release").then(|| d.join(r"..\..\payload"))].into_iter().flatten().find(|p| p.is_dir())
 }
 
 /// Unpacks the `need`ed bundled plugins, runs `f` on them, deletes them. The folder is under Program Files (admin-only writable),
@@ -123,9 +140,12 @@ pub(crate) fn install_plugin(i: usize) -> Result<String, String> {
 pub(crate) fn uninstall_plugin(i: usize) -> Result<String, String> {
     let p = &PLUGINS[i];
     let (_, uninst) = p.actions.ok_or(t!("удаление недоступно", "uninstall is not available"))?;
+    WARN.lock().unwrap().clear();
     uninst().inspect_err(|e| log(&tf!("{}: ОШИБКА удаления {e}", "{}: uninstall ERROR {e}", p.name)))?;
-    log(&tf!("{}: удалён", "{}: removed", p.name));
-    Ok(tf!("{} удалён, система восстановлена.", "{} removed, system restored.", p.name))
+    let w = WARN.lock().unwrap().clone();
+    log(&format!("{}: {} {}", p.name, t!("удалён", "removed"), w.join(" | ")));
+    let note = if w.is_empty() { String::new() } else { tf!(" Предупреждений: {} (см. %ProgramData%\\plugin-launcher\\install.log).", " Warnings: {} (see %ProgramData%\\plugin-launcher\\install.log).", w.len()) };
+    Ok(tf!("{} удалён, система восстановлена.{note}", "{} removed, system restored.{note}", p.name))
 }
 
 pub(crate) fn rollback() -> Result<String, String> {

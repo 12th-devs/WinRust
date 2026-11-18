@@ -151,14 +151,30 @@ fn select(s: &str, sel: &mut [bool]) {
     }
 }
 
-fn qroot(p: &Path) -> PathBuf { PathBuf::from(format!("{}:\\.rs-du-quarantine", p.to_string_lossy().chars().next().unwrap_or('C'))) }
+fn qroot(drive: char) -> PathBuf { PathBuf::from(format!(r"{}:\.rs-du-quarantine", drive.to_ascii_uppercase())) }
+
+/// The list of quarantined items lives next to rs-du.exe (Program Files, admin-only), not in the quarantine folder: under a
+/// drive root any user can create and edit files, and a forged row would make this elevated process delete or move any path.
+fn mpath(drive: char) -> PathBuf {
+    env::current_exe().expect("exe path").with_file_name(format!("quarantine-{}.tsv", drive.to_ascii_uppercase()))
+}
+
+/// Closes the quarantine folder to everyone but administrators and SYSTEM (inherited from a drive root, users could edit it).
+// shortcut: a folder a user created before rs-du ever ran stays owned by them; the trusted list above keeps that harmless.
+fn lock(root: &Path) {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| { let _ = std::process::Command::new("icacls").arg(root).args(["/inheritance:r", "/grant:r", "*S-1-5-32-544:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F", "/Q"]).output(); });
+}
 
 fn quarantine(p: &Path, stamp: u64, n: usize) -> bool {
-    let root = qroot(p);
+    let drive = p.to_string_lossy().chars().next().unwrap_or('C');
+    let root = qroot(drive);
     let dir = root.join(stamp.to_string());
     let to = dir.join(format!("{n}_{}", p.file_name().unwrap_or_default().to_string_lossy()));
-    let ok = fs::create_dir_all(&dir).is_ok() && fs::rename(p, &to).is_ok();
-    if ok && let Ok(mut f) = fs::OpenOptions::new().append(true).create(true).open(root.join("manifest.tsv")) {
+    let made = fs::create_dir_all(&dir).is_ok();
+    if made { lock(&root); }
+    let ok = made && fs::rename(p, &to).is_ok();
+    if ok && let Ok(mut f) = fs::OpenOptions::new().append(true).create(true).open(mpath(drive)) {
         let _ = writeln!(f, "{stamp}\t{}\t{}", p.display(), to.display());
     }
     ok
@@ -166,12 +182,18 @@ fn quarantine(p: &Path, stamp: u64, n: usize) -> bool {
 
 type Row = (u64, PathBuf, PathBuf); // (when, original path, quarantined path)
 
-fn manifest(drive: char) -> (PathBuf, Vec<Row>) {
-    let m = PathBuf::from(format!("{drive}:\\.rs-du-quarantine\\manifest.tsv"));
-    let rows = fs::read_to_string(&m).unwrap_or_default().lines().filter_map(|l| {
+/// Rows whose quarantined path is not inside this drive's quarantine folder are dropped: purge deletes that path.
+fn parse(text: &str, drive: char) -> Vec<Row> {
+    let root = qroot(drive);
+    text.lines().filter_map(|l| {
         let mut s = l.splitn(3, '\t');
         Some((s.next()?.parse().ok()?, s.next()?.into(), s.next()?.into()))
-    }).collect();
+    }).filter(|r: &Row| r.2.starts_with(&root) && !r.2.components().any(|c| c == std::path::Component::ParentDir)).collect()
+}
+
+fn manifest(drive: char) -> (PathBuf, Vec<Row>) {
+    let m = mpath(drive);
+    let rows = parse(&fs::read_to_string(&m).unwrap_or_default(), drive);
     (m, rows)
 }
 
@@ -195,7 +217,7 @@ pub fn purge(drive: char, all: bool) {
         keep.push(r);
     }
     save(&m, &keep);
-    for d in subdirs(m.parent().unwrap_or(Path::new("")), |_| true) { let _ = fs::remove_dir(d); } // only empty ones go
+    for d in subdirs(&qroot(drive), |_| true) { let _ = fs::remove_dir(d); } // only empty ones go
     if freed > 0 { println!("quarantine emptied: {} freed", human(freed)); }
 }
 
@@ -304,9 +326,14 @@ mod tests {
         let d = env::temp_dir().join("rs-du-test-manifest");
         let _ = fs::create_dir_all(&d);
         let m = d.join("manifest.tsv");
-        save(&m, &[(5, "C:\\a".into(), "C:\\q\\1_a".into())]);
-        let rows: Vec<Row> = fs::read_to_string(&m).unwrap().lines().filter_map(|l| { let mut s = l.splitn(3, '\t'); Some((s.next()?.parse().ok()?, s.next()?.into(), s.next()?.into())) }).collect();
-        assert_eq!(rows, vec![(5, PathBuf::from("C:\\a"), PathBuf::from("C:\\q\\1_a"))]);
+        save(&m, &[(5, r"C:\a".into(), r"C:\.rs-du-quarantine\5\1_a".into())]);
+        assert_eq!(parse(&fs::read_to_string(&m).unwrap(), 'c'), vec![(5, PathBuf::from(r"C:\a"), PathBuf::from(r"C:\.rs-du-quarantine\5\1_a"))]);
         let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn manifest_rows_outside_the_quarantine_are_dropped() {
+        let t = [r"C:\Windows\System32", r"C:\.rs-du-quarantine\..\Windows", r"D:\.rs-du-quarantine\1\a"].map(|q| format!("0\tC:\\x\t{q}")).join("\n");
+        assert!(parse(&t, 'C').is_empty());
     }
 }

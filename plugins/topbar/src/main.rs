@@ -838,6 +838,53 @@ unsafe fn win_icon(w: HWND) -> HICON {
     if ic.is_null() { icon_of(w) } else { ic }
 }
 
+/// "c:\program files\windowsapps\claude_5.1.0.0_x64__pzs8\app\claude.exe" -> ("claude_pzs8", "app\claude.exe"):
+/// the package family (name + publisher id, the same across versions) and the path inside the package folder.
+fn msix_family(target: &str) -> Option<(String, String)> {
+    let l = target.to_lowercase();
+    let (_, tail) = l.split_once(r"\windowsapps\")?;
+    let (folder, rest) = tail.split_once('\\')?;
+    let parts: Vec<&str> = folder.split('_').collect(); // name_version_arch_resourceid_publisherid
+    (parts.len() == 5).then(|| (format!("{}_{}", parts[0], parts[4]), rest.to_string()))
+}
+
+/// A pin of a Store (MSIX) app points into its versioned package folder, which is gone after every app update
+/// ("Windows cannot find ...\Claude_5.11492.5.0_x64__...\claude.exe"). Re-points the .lnk to the installed version.
+/// Returns the new target (lower-case), None if the target exists or is not in a package.
+unsafe fn fix_msix_pin(lnk: &[u16], target: &str) -> Option<String> {
+    use windows_sys::Win32::Storage::Packaging::Appx::{GetPackagePathByFullName, GetPackagesByPackageFamily};
+    if target.is_empty() || std::path::Path::new(target).exists() {
+        return None;
+    }
+    let (family, rest) = msix_family(target)?;
+    let fam = wide(&family);
+    let (mut count, mut len) = (0u32, 0u32);
+    GetPackagesByPackageFamily(fam.as_ptr(), &mut count, null_mut(), &mut len, null_mut()); // sizes only
+    if count == 0 {
+        return None; // the app was uninstalled
+    }
+    let (mut names, mut buf) = (vec![null_mut::<u16>(); count as usize], vec![0u16; len as usize]);
+    if GetPackagesByPackageFamily(fam.as_ptr(), &mut count, names.as_mut_ptr(), &mut len, buf.as_mut_ptr()) != 0 {
+        return None;
+    }
+    let mut path = [0u16; 520];
+    let mut plen = path.len() as u32;
+    if GetPackagePathByFullName(names[0], &mut plen, path.as_mut_ptr()) != 0 {
+        return None;
+    }
+    let new = std::path::Path::new(&wstr_of(&path)).join(&rest);
+    if !new.exists() {
+        return None;
+    }
+    let new = new.to_string_lossy().to_lowercase();
+    let sl: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
+    let pf = sl.cast::<IPersistFile>().ok()?;
+    pf.Load(PCWSTR(lnk.as_ptr()), STGM(0)).ok()?;
+    sl.SetPath(PCWSTR(wide(&new).as_ptr())).ok()?;
+    pf.Save(PCWSTR(lnk.as_ptr()), true).ok()?;
+    Some(new)
+}
+
 /// Pinned apps (the .lnk files Windows keeps for the taskbar) with their icons and target exe.
 unsafe fn load_pins() {
     let Some(appdata) = std::env::var_os("APPDATA") else { return };
@@ -848,6 +895,7 @@ unsafe fn load_pins() {
     for f in files {
         let lnk = wide(&f.to_string_lossy());
         let target = lnk_target(&lnk);
+        let target = fix_msix_pin(&lnk, &target).unwrap_or(target);
         let icon = lnk_icon(&lnk, &target);
         PINS.with_borrow_mut(|p| p.push(Pin { lnk, target, icon }));
     }
@@ -1933,7 +1981,11 @@ unsafe fn click(h: i32, left: bool, mid: bool) {
         1.. => {
             let (wins, lnk) = BTNS.with_borrow(|b| b.get(h as usize).map(|b| (b.wins.clone(), b.pin.and_then(|p| PINS.with_borrow(|p2| p2.get(p).map(|x| x.lnk.clone()))))).unwrap_or_default());
             match (wins.first(), left) {
-                (None, true) => lnk.iter().for_each(|l| open(l)), // not running: launch the pinned app
+                // not running: launch the pinned app (a Store app may have updated since the pins were loaded)
+                (None, true) => lnk.iter().for_each(|l| {
+                    PINS.with_borrow_mut(|p| p.iter_mut().filter(|x| x.lnk == *l).for_each(|x| x.target = fix_msix_pin(l, &x.target).unwrap_or(std::mem::take(&mut x.target))));
+                    open(l)
+                }),
                 (Some(&w), false) => close_window(w), // right / middle click
                 (Some(&w), true) => {
                     // like the Windows taskbar: the active app's button minimizes it, a minimized one restores, any other raises
@@ -2253,6 +2305,40 @@ mod tests {
         assert_eq!(super::mix(super::rgb(0, 0, 0), super::rgb(200, 100, 50), 0.0), super::rgb(0, 0, 0));
         assert_eq!(super::mix(super::rgb(0, 0, 0), super::rgb(200, 100, 50), 1.0), super::rgb(200, 100, 50));
         assert_eq!(super::mix(super::rgb(0, 0, 0), super::rgb(200, 100, 50), 0.5), super::rgb(100, 50, 25));
+    }
+
+    #[test]
+    fn msix_family_from_package_path() {
+        let f = super::msix_family(r"C:\Program Files\WindowsApps\Claude_5.11492.5.0_x64__pzs8sxrjxfjjc\app\claude.exe");
+        assert_eq!(f, Some(("claude_pzs8sxrjxfjjc".into(), r"app\claude.exe".into())));
+        assert_eq!(super::msix_family(r"C:\Program Files\Steam\steam.exe"), None);
+    }
+
+    #[test]
+    fn stale_claude_pin_resolves_to_installed_version() {
+        // real system check: skipped where the Claude package is not installed (CI)
+        let old = r"c:\program files\windowsapps\claude_5.11492.5.0_x64__pzs8sxrjxfjjc\app\claude.exe";
+        let Some((fam, _)) = super::msix_family(old) else { panic!() };
+        let mut n = 0u32;
+        let mut len = 0u32;
+        unsafe { windows_sys::Win32::Storage::Packaging::Appx::GetPackagesByPackageFamily(super::wide(&fam).as_ptr(), &mut n, std::ptr::null_mut(), &mut len, std::ptr::null_mut()) };
+        if n == 0 {
+            return;
+        }
+        let tmp = std::env::temp_dir().join("topbar-msix-test.lnk");
+        let _ = std::fs::remove_file(&tmp);
+        unsafe {
+            use windows::Win32::System::Com::*;
+            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            let sl: windows::Win32::UI::Shell::IShellLinkW = CoCreateInstance(&windows::Win32::UI::Shell::ShellLink, None, CLSCTX_INPROC_SERVER).unwrap();
+            sl.SetPath(windows::core::PCWSTR(super::wide(old).as_ptr())).unwrap();
+            windows::core::Interface::cast::<IPersistFile>(&sl).unwrap().Save(windows::core::PCWSTR(super::wide(&tmp.to_string_lossy()).as_ptr()), true).unwrap();
+            let lnk = super::wide(&tmp.to_string_lossy());
+            let new = super::fix_msix_pin(&lnk, old).expect("re-pointed");
+            assert!(std::path::Path::new(&new).exists() && new.ends_with(r"\app\claude.exe"), "{new}");
+            assert_eq!(super::lnk_target(&lnk), new);
+        }
+        let _ = std::fs::remove_file(&tmp);
     }
 }
 

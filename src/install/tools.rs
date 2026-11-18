@@ -15,11 +15,6 @@ pub(crate) fn db_dir() -> PathBuf {
     program_files().join("debloat")
 }
 
-/// Start Menu shortcut: search and the bar's Start panel list Start Menu shortcuts only.
-pub(crate) fn start_lnk(name: &str) -> PathBuf {
-    PathBuf::from(env::var("ProgramData").unwrap_or_else(|_| r"C:\ProgramData".into())).join(format!(r"Microsoft\Windows\Start Menu\Programs\{name}.lnk"))
-}
-
 /// Copies `exe` out of the payload into `dir` (an update: the running copy is killed first) and adds the Start Menu shortcut `lnk`.
 pub(crate) fn tool_install(exe: &str, dir: &Path, lnk: Option<&str>) -> Result<(), String> {
     with_payload(&[exe], |d| {
@@ -28,7 +23,7 @@ pub(crate) fn tool_install(exe: &str, dir: &Path, lnk: Option<&str>) -> Result<(
         let dst = dir.join(exe);
         put(&d.join(exe), &dst)?;
         if let Some(n) = lnk {
-            soft(&tf!("ярлык «{n}» в меню Пуск не создан, поиск его не увидит", "Start menu shortcut '{n}' was not created, search will not find it"), run("powershell", &["-NoProfile", "-Command", &format!("$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{}'); $s.TargetPath='{}'; $s.Save()", start_lnk(n).display(), dst.display())]));
+            soft(&tf!("ярлык «{n}» в меню Пуск не создан, поиск его не увидит", "Start menu shortcut '{n}' was not created, search will not find it"), shortcut(&start_lnk(n), &dst, ""));
         }
         Ok(())
     })
