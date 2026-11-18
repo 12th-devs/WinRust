@@ -15,6 +15,7 @@ Each item says how far it was checked: **tests** (unit tests), **built** (compil
 - Command line: `list | install <plugin> --yes | update <plugin> | uninstall <plugin> | rollback --yes`, exit codes 0/1/2; the window and the command line call the same functions. Only the read-only commands were run. *ran (partly)*
 - `update` and `scripts\update-plugin.ps1`: reinstall from `payload\` on disk without rebuilding the installer. *ran*
 - English by default, Русский/English switch in the installer and in the bar menu; the choice is stored in `%ProgramData%\WinRust\lang.txt`. *tests*
+- Review fixes (v0.3.0): rs-du keeps its quarantine list next to its exe (admin-only), `payload\` two levels up only from `target\release`, rtaskmgr and rust-explorer save and restore another program's Task Manager / folder settings, rust-search brings Windows Search back before removing its files, DiagTrack is left to debloat, one `reg query` parser with a test. *tests, built*
 - Code layout: one cargo workspace; the installer split into `install/` (one file per plugin), `cli.rs`, `ui.rs`; shared `winrust-common` crate (language switch, MFT reader); one `payload.txt` list for the build and the scripts; CI on GitHub Actions. *tests*
 
 ### Plugins
@@ -23,6 +24,8 @@ Each item says how far it was checked: **tests** (unit tests), **built** (compil
 - **topbar**: Windows 11-style bottom bar instead of the taskbar; `topbar.exe --restore` brings the taskbar back. Installs with it: reshell hotkeys, rs-du, the PowerShell profile block (`src/install/profile.ps1`, Windows PowerShell 5.1 and pwsh 7). *ran; the profile block only on a temporary profile*
 - **reshell safety net**: if topbar is not running while the taskbar is hidden, twice in a row (~10 s), it runs `topbar.exe --restore`. *tests; killing topbar was not tried*
 - **reshell hotkeys**: Win+D (show desktop) and Win+I (Settings) work without Explorer, like Win+E (v0.2.1). *ran*
+- **Styles** (v0.3.0): a gear at the left end of the bar switches Normal / Terminal / Floating dock / Tiling; the bar, rust-explorer and the search window repaint at once (a broadcast message, `%ProgramData%\WinRust\style.txt`). The dock reserves no screen space and slides away from maximized windows; Tiling puts the bar at the top and can tile the windows. *ran*
+- **topbar look** (v0.3.0): the network icon is drawn (Wi-Fi arcs by signal, a cross when offline, "!" when there is no internet, per Windows' connectivity hint); new Wi-Fi panel (status, connected card with its own Disconnect button, saved/open networks, rows fade in); text-only menus with key hints; input language picker (left click on ENG/RUS); the tray flyout fades in and its chevron turns. *ran*
 - **rust-explorer**: file manager (tabs, icons, IFileOperation copy/paste/delete, shell context menu, drag and drop), draws the desktop, turns off Explorer as the shell with `rs-shell --overlay` (90 s after sign-in at the latest: Windows 26300 no longer writes the autostart markers it used to wait for, v0.2.1), trims services. *tests, ran*
 - **rs-du**: disk cleaner (MFT analysis, caches, `target`/`node_modules`, recycle bin, 30-day quarantine), started from the bar menu. *tests*
 - **wiztree**: disk-usage treemap from the MFT. *tests (layout only); not run on a live disk*

@@ -42,13 +42,42 @@ use windows_sys::Win32::{
 };
 
 type Rgb = (u8, u8, u8);
-const BG: Rgb = (30, 31, 36);
-const BORDER: Rgb = (62, 63, 72);
-const SEL: Rgb = (46, 50, 62);
-const ACCENT: Rgb = (96, 165, 250);
-const TEXT: Rgb = (240, 240, 244);
-const DIM: Rgb = (143, 146, 158);
-const FAINT: Rgb = (98, 101, 112);
+// Colours of the WinRust style the topbar gear picks (normal, terminal, dock, tiling): the same palette as the bar.
+use winrust_common::style::{pal, style, ui_face};
+fn cr(c: u32) -> Rgb {
+    (c as u8, (c >> 8) as u8, (c >> 16) as u8)
+}
+fn mixc(a: u32, b: u32, t: f32) -> u32 {
+    let ch = |sh: u32| (((a >> sh) & 255) as f32 + ((((b >> sh) & 255) as f32) - ((a >> sh) & 255) as f32) * t) as u32;
+    ch(0) | ch(8) << 8 | ch(16) << 16
+}
+fn c_bg() -> Rgb {
+    cr(pal().bg)
+}
+fn c_border() -> Rgb {
+    cr(pal().line)
+}
+fn c_sel() -> Rgb {
+    cr(pal().active)
+}
+fn c_accent() -> Rgb {
+    cr(pal().accent)
+}
+fn c_text() -> Rgb {
+    cr(pal().text)
+}
+fn c_dim() -> Rgb {
+    cr(pal().dim)
+}
+fn c_faint() -> Rgb {
+    cr(mixc(pal().dim, pal().bg, 0.4))
+}
+fn c_menu_bg() -> Rgb {
+    cr(mixc(pal().bg, pal().line, 0.5))
+}
+fn c_menu_hot() -> Rgb {
+    cr(pal().active)
+}
 
 // logical pixels; multiplied by the screen scale when used
 const W: i32 = 680;
@@ -344,7 +373,38 @@ unsafe fn text_changed(h: HWND) {
     InvalidateRect(h, null(), 0);
 }
 
+/// Fonts and frame of the current WinRust style: at start, and again when the topbar broadcasts a style change.
+unsafe fn apply_style(main: HWND) {
+    let scale = st(|s| s.scale);
+    let font = |px: i32, weight: i32, face: &str| {
+        CreateFontW(-((px as f32 * scale).round() as i32), 0, 0, 0, weight, 0, 0, 0, DEFAULT_CHARSET as _, 0, 0, CLEARTYPE_QUALITY as _, 0, wide(face).as_ptr()) as isize
+    };
+    let face = ui_face();
+    let fonts = [font(22, 400, face), font(16, 600, face), font(13, 400, face), font(20, 400, "Segoe MDL2 Assets"), font(12, 400, face)];
+    for f in st(|s| std::mem::replace(&mut s.fonts, fonts)) {
+        if f != 0 {
+            DeleteObject(f as _);
+        }
+    }
+    // Windows 11: rounded corners (square in the terminal and tiling styles), dark frame, border colour. Windows 10 rejects the corner attribute.
+    let square = style().square();
+    let (round, dark, border) = (if square { 1i32 } else { 2i32 }, 1i32, rgb(c_border()) as i32);
+    let hr = DwmSetWindowAttribute(main, 33, &round as *const _ as _, 4);
+    DwmSetWindowAttribute(main, 20, &dark as *const _ as _, 4);
+    DwmSetWindowAttribute(main, 34, &border as *const _ as _, 4);
+    st(|s| s.round_with_region = hr != 0 && !square);
+    if square {
+        SetWindowRgn(main, null_mut(), 1);
+    }
+}
+
 unsafe extern "system" fn wndproc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    if m == winrust_common::style::msg() {
+        winrust_common::style::reload();
+        apply_style(h);
+        InvalidateRect(h, null(), 0);
+        return 0;
+    }
     match m {
         WM_HOTKEY => {
             if IsWindowVisible(h) != 0 && st(|s| s.ta) > 0.0 { hide(h) } else { show(h) }
@@ -562,8 +622,6 @@ fn start_toggle(p: &str) {
 const MENU_W: i32 = 270;
 const MENU_ITEM_H: i32 = 32;
 const MENU_PAD: i32 = 6;
-const MENU_BG: Rgb = (40, 42, 50);
-const MENU_HOT: Rgb = (62, 68, 84);
 const DANGER: Rgb = (248, 113, 113);
 
 struct MenuSt {
@@ -976,31 +1034,31 @@ fn purge_view(s: &St) -> Option<PView> {
     let btn = |labels: &[(&'static str, bool)], hot: usize| rects.iter().zip(labels).enumerate().map(|(i, (r, (l, d)))| (*r, *l, *d, i == hot)).collect::<Vec<_>>();
     Some(match s.purge.as_ref()? {
         Purge::Scanning(path) => PView {
-            glyph: ("\u{E721}", DIM),
-            title: ("Checking what will be removed\u{2026}".into(), TEXT),
+            glyph: ("\u{E721}", c_dim()),
+            title: ("Checking what will be removed\u{2026}".into(), c_text()),
             path: path.clone(),
-            lines: vec![("Counting files and searching the registry. Nothing is deleted yet.".into(), DIM, false)],
+            lines: vec![("Counting files and searching the registry. Nothing is deleted yet.".into(), c_dim(), false)],
             note: String::new(),
             buttons: vec![],
         },
         Purge::Working(path) => PView {
             glyph: ("\u{E74D}", DANGER),
-            title: ("Deleting\u{2026}".into(), TEXT),
+            title: ("Deleting\u{2026}".into(), c_text()),
             path: path.clone(),
-            lines: vec![("Esc hides this card; the result waits for the next Alt+Space.".into(), DIM, false)],
+            lines: vec![("Esc hides this card; the result waits for the next Alt+Space.".into(), c_dim(), false)],
             note: String::new(),
             buttons: vec![],
         },
         Purge::Confirm { path, files, bytes, hits, hot } => {
-            let mut lines = vec![(format!("{}  \u{00B7}  {}", plural(*files as usize, "file"), size_text(*bytes)), TEXT, false)];
+            let mut lines = vec![(format!("{}  \u{00B7}  {}", plural(*files as usize, "file"), size_text(*bytes)), c_text(), false)];
             if hits.is_empty() {
-                lines.push(("No registry entries point to it.".into(), DIM, false));
+                lines.push(("No registry entries point to it.".into(), c_dim(), false));
             } else {
                 let n = plural(hits.len(), "registry entry").replace("entrys", "entries");
-                lines.push((format!("{n} {} to it and will be removed:", if hits.len() == 1 { "points" } else { "point" }), DIM, false));
-                lines.extend(hits.iter().take(LIST_MAX).map(|h| (h.describe(), FAINT, true)));
+                lines.push((format!("{n} {} to it and will be removed:", if hits.len() == 1 { "points" } else { "point" }), c_dim(), false));
+                lines.extend(hits.iter().take(LIST_MAX).map(|h| (h.describe(), c_faint(), true)));
                 if hits.len() > LIST_MAX {
-                    lines.push((format!("+ {} more", hits.len() - LIST_MAX), FAINT, true));
+                    lines.push((format!("+ {} more", hits.len() - LIST_MAX), c_faint(), true));
                 }
             }
             PView {
@@ -1013,10 +1071,10 @@ fn purge_view(s: &St) -> Option<PView> {
             }
         }
         Purge::Done { path, title, lines, ok, backup, hot } => PView {
-            glyph: if *ok { ("\u{E73E}", ACCENT) } else { ("\u{E7BA}", DANGER) },
-            title: (title.clone(), if *ok { TEXT } else { DANGER }),
+            glyph: if *ok { ("\u{E73E}", c_accent()) } else { ("\u{E7BA}", DANGER) },
+            title: (title.clone(), if *ok { c_text() } else { DANGER }),
             path: path.clone(),
-            lines: lines.iter().enumerate().map(|(i, l)| (l.clone(), if i == 0 { TEXT } else { DIM }, false)).collect(),
+            lines: lines.iter().enumerate().map(|(i, l)| (l.clone(), if i == 0 { c_text() } else { c_dim() }, false)).collect(),
             note: backup.as_ref().map_or(String::new(), |b| format!("Backup (double-click to restore): {b}")),
             buttons: if backup.is_some() { btn(&[("Close", false), ("Show backup", false)], *hot) } else { btn(&[("Close", false)], 0) },
         },
@@ -1036,17 +1094,17 @@ unsafe fn draw_purge(dc: HDC, w: i32, v: &View, pv: &PView) {
             // the destructive button stays an outline until it is the chosen one
             round_rect(g, l, t, bw, bh, rad, DANGER);
             if !*hot {
-                round_rect(g, l + 1.5 * s, t + 1.5 * s, bw - 3.0 * s, bh - 3.0 * s, rad - 1.5 * s, BG);
+                round_rect(g, l + 1.5 * s, t + 1.5 * s, bw - 3.0 * s, bh - 3.0 * s, rad - 1.5 * s, c_bg());
             }
         } else {
-            round_rect(g, l, t, bw, bh, rad, if *hot { MENU_HOT } else { MENU_BG });
+            round_rect(g, l, t, bw, bh, rad, if *hot { c_menu_hot() } else { c_menu_bg() });
         }
     }
     GdipDeleteGraphics(g);
     let left = p(58);
     text(dc, v.fonts[F_ICON], pv.glyph.1, RECT { left: p(22), top: top + p(12), right: p(52), bottom: top + p(40) }, pv.glyph.0, DT_SINGLELINE | DT_VCENTER);
     text(dc, v.fonts[F_NAME], pv.title.1, RECT { left, top: top + p(12), right: w - p(22), bottom: top + p(40) }, &pv.title.0, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
-    text(dc, v.fonts[F_PATH], DIM, RECT { left, top: top + p(40), right: w - p(22), bottom: top + p(60) }, &pv.path, DT_SINGLELINE | DT_PATH_ELLIPSIS);
+    text(dc, v.fonts[F_PATH], c_dim(), RECT { left, top: top + p(40), right: w - p(22), bottom: top + p(60) }, &pv.path, DT_SINGLELINE | DT_PATH_ELLIPSIS);
     let mut y = top + p(74);
     for (line, c, small) in &pv.lines {
         let hgt = p(if *small { 18 } else { 22 });
@@ -1056,10 +1114,10 @@ unsafe fn draw_purge(dc: HDC, w: i32, v: &View, pv: &PView) {
     }
     let bottom = top + p(PANEL_H);
     if !pv.note.is_empty() {
-        text(dc, v.fonts[F_HINT], FAINT, RECT { left: p(22), top: bottom - p(20 + 36 + 30), right: w - p(22), bottom: bottom - p(20 + 36 + 8) }, &pv.note, DT_SINGLELINE | DT_VCENTER | DT_PATH_ELLIPSIS);
+        text(dc, v.fonts[F_HINT], c_faint(), RECT { left: p(22), top: bottom - p(20 + 36 + 30), right: w - p(22), bottom: bottom - p(20 + 36 + 8) }, &pv.note, DT_SINGLELINE | DT_VCENTER | DT_PATH_ELLIPSIS);
     }
     for ((l, t, r, b), label, danger, hot) in &pv.buttons {
-        let c = if *danger && *hot { (20, 20, 24) } else if *danger { DANGER } else { TEXT };
+        let c = if *danger && *hot { (20, 20, 24) } else if *danger { DANGER } else { c_text() };
         text(dc, v.fonts[F_PATH], c, RECT { left: *l, top: *t, right: *r, bottom: *b }, label, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
     }
 }
@@ -1134,6 +1192,7 @@ unsafe fn fill(dc: HDC, l: i32, t: i32, r: i32, b: i32, c: Rgb) {
 }
 
 unsafe fn round_rect(g: *mut GpGraphics, x: f32, y: f32, w: f32, h: f32, r: f32, c: Rgb) {
+    let r = if style().square() { 0.5 } else { r }; // a hair of a radius: zero-size arcs would drop the whole shape
     let mut path: *mut GpPath = null_mut();
     GdipCreatePath(FillModeAlternate, &mut path);
     let d = r * 2.0;
@@ -1161,7 +1220,7 @@ unsafe fn draw(dc: HDC, w: i32, hgt: i32, v: &View) {
     let s = v.scale;
     let p = |x: i32| (x as f32 * s).round() as i32;
     SetBkMode(dc, TRANSPARENT as i32);
-    fill(dc, 0, 0, w, hgt, BG);
+    fill(dc, 0, 0, w, hgt, c_bg());
 
     let (rows_top, row_h) = (p(INPUT_H + PAD), ROW_H as f32 * s);
     let nrows = v.rows.len();
@@ -1172,18 +1231,18 @@ unsafe fn draw(dc: HDC, w: i32, hgt: i32, v: &View) {
     GdipSetSmoothingMode(g, SmoothingModeAntiAlias);
     if nrows > 0 && v.purge.is_none() {
         let y = rows_top as f32 + v.sel_f * row_h;
-        round_rect(g, p(PAD) as f32, y + 2.0 * s, (w - 2 * p(PAD)) as f32, row_h - 4.0 * s, 10.0 * s, SEL);
-        round_rect(g, p(PAD + 4) as f32, y + row_h / 2.0 - 10.0 * s, 3.0 * s, 20.0 * s, 1.5 * s, ACCENT);
+        round_rect(g, p(PAD) as f32, y + 2.0 * s, (w - 2 * p(PAD)) as f32, row_h - 4.0 * s, 10.0 * s, c_sel());
+        round_rect(g, p(PAD + 4) as f32, y + row_h / 2.0 - 10.0 * s, 3.0 * s, 20.0 * s, 1.5 * s, c_accent());
     }
     GdipDeleteGraphics(g);
 
     // input row
     let mid = p(INPUT_H) / 2;
-    text(dc, v.fonts[F_ICON], DIM, RECT { left: p(22), top: mid - p(14), right: p(52), bottom: mid + p(14) }, "\u{E721}", DT_SINGLELINE | DT_VCENTER);
+    text(dc, v.fonts[F_ICON], c_dim(), RECT { left: p(22), top: mid - p(14), right: p(52), bottom: mid + p(14) }, "\u{E721}", DT_SINGLELINE | DT_VCENTER);
     let area = RECT { left: p(58), top: mid - p(18), right: w - p(24), bottom: mid + p(18) };
     let shown = String::from_utf16_lossy(&v.text);
     if v.text.is_empty() {
-        text(dc, v.fonts[F_INPUT], FAINT, area, "Search files and apps", DT_SINGLELINE | DT_VCENTER);
+        text(dc, v.fonts[F_INPUT], c_faint(), area, "Search files and apps", DT_SINGLELINE | DT_VCENTER);
     } else {
         let mut size: SIZE = zeroed();
         let old = SelectObject(dc, v.fonts[F_INPUT] as _);
@@ -1192,25 +1251,25 @@ unsafe fn draw(dc: HDC, w: i32, hgt: i32, v: &View) {
         let overflow = (size.cx - (area.right - area.left - p(4))).max(0); // keep the end (caret) in view
         let saved = SaveDC(dc);
         IntersectClipRect(dc, area.left, area.top, area.right, area.bottom);
-        text(dc, v.fonts[F_INPUT], TEXT, RECT { left: area.left - overflow, ..area }, &shown, DT_SINGLELINE | DT_VCENTER | DT_NOCLIP);
+        text(dc, v.fonts[F_INPUT], c_text(), RECT { left: area.left - overflow, ..area }, &shown, DT_SINGLELINE | DT_VCENTER | DT_NOCLIP);
         if v.caret {
-            fill(dc, area.left - overflow + size.cx + p(2), mid - p(13), area.left - overflow + size.cx + p(4), mid + p(13), ACCENT);
+            fill(dc, area.left - overflow + size.cx + p(2), mid - p(13), area.left - overflow + size.cx + p(4), mid + p(13), c_accent());
         }
         RestoreDC(dc, saved);
     }
     if v.text.is_empty() && v.caret {
-        fill(dc, p(58), mid - p(13), p(58) + p(2), mid + p(13), ACCENT);
+        fill(dc, p(58), mid - p(13), p(58) + p(2), mid + p(13), c_accent());
     }
 
     if !v.text.is_empty() || v.purge.is_some() {
-        fill(dc, p(PAD + 6), p(INPUT_H) - 1, w - p(PAD + 6), p(INPUT_H), BORDER); // separator
+        fill(dc, p(PAD + 6), p(INPUT_H) - 1, w - p(PAD + 6), p(INPUT_H), c_border()); // separator
     }
     if let Some(pv) = &v.purge {
         return draw_purge(dc, w, v, pv);
     }
     if nrows == 0 {
         if !v.text.is_empty() {
-            text(dc, v.fonts[F_NAME], DIM, RECT { left: 0, top: rows_top, right: w, bottom: rows_top + row_h as i32 }, "No results", DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+            text(dc, v.fonts[F_NAME], c_dim(), RECT { left: 0, top: rows_top, right: w, bottom: rows_top + row_h as i32 }, "No results", DT_SINGLELINE | DT_VCENTER | DT_CENTER);
         }
         return;
     }
@@ -1222,15 +1281,15 @@ unsafe fn draw(dc: HDC, w: i32, hgt: i32, v: &View) {
             DrawIconEx(dc, p(PAD + 16), y0 + (row_h as i32 - isz) / 2, *icon as _, isz, isz, 0, null_mut(), DI_NORMAL);
         }
         let (left, right) = (p(PAD + 16 + 28 + 14), w - p(PAD + 14));
-        text(dc, v.fonts[F_NAME], TEXT, RECT { left, top: y0 + p(7), right, bottom: y0 + p(29) }, name, DT_SINGLELINE | DT_END_ELLIPSIS);
-        text(dc, v.fonts[F_PATH], DIM, RECT { left, top: y0 + p(29), right, bottom: y0 + p(47) }, sub, DT_SINGLELINE | DT_END_ELLIPSIS);
+        text(dc, v.fonts[F_NAME], c_text(), RECT { left, top: y0 + p(7), right, bottom: y0 + p(29) }, name, DT_SINGLELINE | DT_END_ELLIPSIS);
+        text(dc, v.fonts[F_PATH], c_dim(), RECT { left, top: y0 + p(29), right, bottom: y0 + p(47) }, sub, DT_SINGLELINE | DT_END_ELLIPSIS);
     }
     let foot_y = rows_top + (nrows as f32 * row_h) as i32;
     let more = if v.total > nrows { format!("   \u{2022}   {} results", v.total) } else { String::new() };
     text(
         dc,
         v.fonts[F_HINT],
-        FAINT,
+        c_faint(),
         RECT { left: p(PAD + 16), top: foot_y + p(4), right: w - p(PAD + 14), bottom: foot_y + p(FOOT_H) },
         &if v.renaming {
             "Type the new name     \u{21B5} rename     Esc cancel".to_string()
@@ -1246,14 +1305,14 @@ unsafe fn draw(dc: HDC, w: i32, hgt: i32, v: &View) {
         let mut g: *mut GpGraphics = null_mut();
         GdipCreateFromHDC(dc, &mut g);
         GdipSetSmoothingMode(g, SmoothingModeAntiAlias);
-        round_rect(g, l as f32, t as f32, mw as f32, mh as f32, 10.0 * s, BORDER);
-        round_rect(g, (l + 1) as f32, (t + 1) as f32, (mw - 2) as f32, (mh - 2) as f32, 9.0 * s, MENU_BG);
-        round_rect(g, (l + pad) as f32, (t + pad + hot as i32 * ih) as f32, (mw - 2 * pad) as f32, ih as f32, 7.0 * s, MENU_HOT);
+        round_rect(g, l as f32, t as f32, mw as f32, mh as f32, 10.0 * s, c_border());
+        round_rect(g, (l + 1) as f32, (t + 1) as f32, (mw - 2) as f32, (mh - 2) as f32, 9.0 * s, c_menu_bg());
+        round_rect(g, (l + pad) as f32, (t + pad + hot as i32 * ih) as f32, (mw - 2 * pad) as f32, ih as f32, 7.0 * s, c_menu_hot());
         GdipDeleteGraphics(g);
         for (i, label) in MENU.iter().enumerate() {
             let label = if i == 3 && v.menu_pinned { "Remove from Start" } else { label };
             let y0 = t + pad + i as i32 * ih;
-            let c = if i == MENU.len() - 1 { DANGER } else { TEXT };
+            let c = if i == MENU.len() - 1 { DANGER } else { c_text() };
             text(dc, v.fonts[F_PATH], c, RECT { left: l + pad + p(12), top: y0, right: l + mw - pad, bottom: y0 + ih }, label, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
         }
     }
@@ -1301,21 +1360,8 @@ fn main() {
             return;
         }
 
-        // Windows 11: rounded corners, dark frame, border colour. Windows 10 rejects the corner attribute.
-        let (round, dark, border) = (2i32, 1i32, rgb(BORDER) as i32);
-        let hr = DwmSetWindowAttribute(main, 33, &round as *const _ as _, 4);
-        DwmSetWindowAttribute(main, 20, &dark as *const _ as _, 4);
-        DwmSetWindowAttribute(main, 34, &border as *const _ as _, 4);
-
-        let font = |px: i32, weight: i32, face: &str| {
-            CreateFontW(-((px as f32 * scale).round() as i32), 0, 0, 0, weight, 0, 0, 0, DEFAULT_CHARSET as _, 0, 0, CLEARTYPE_QUALITY as _, 0, wide(face).as_ptr()) as isize
-        };
-        let fonts = [font(22, 400, "Segoe UI"), font(16, 600, "Segoe UI"), font(13, 400, "Segoe UI"), font(20, 400, "Segoe MDL2 Assets"), font(12, 400, "Segoe UI")];
-        st(|s| {
-            s.scale = scale;
-            s.round_with_region = hr != 0;
-            s.fonts = fonts;
-        });
+        st(|s| s.scale = scale);
+        apply_style(main);
 
         if RegisterHotKey(main, 1, MOD_ALT | MOD_NOREPEAT, VK_SPACE as u32) == 0 {
             MessageBoxW(null_mut(), wide("Alt+Space is taken (is the launcher already running?)").as_ptr(), wide("rs launcher").as_ptr(), MB_ICONERROR);

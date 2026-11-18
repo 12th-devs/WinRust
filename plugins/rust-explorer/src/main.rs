@@ -921,6 +921,12 @@ unsafe extern "system" fn edit_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
 
 unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     unsafe {
+        if m == winrust_common::style::msg() {
+            // the topbar switched the WinRust style: take it now (the desktop's list keeps its see-through colours)
+            winrust_common::style::reload();
+            if desk() { InvalidateRect(h, ptr::null(), 1); } else { ui::restyle(h); }
+            return 0;
+        }
         match m {
             WM_CREATE => {
                 let inst = GetModuleHandleW(ptr::null());
@@ -932,7 +938,7 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
                     tab = CreateWindowExW(0, w("RxChrome").as_ptr(), ptr::null(), WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN, 0, 0, 0, 0, h, 0 as _, inst, ptr::null());
                     ui::nav_init(CreateWindowExW(0, w("RxNav").as_ptr(), ptr::null(), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, h, 0 as _, inst, ptr::null()));
                     edit = CreateWindowExW(0, w("EDIT").as_ptr(), ptr::null(), WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL as u32, 0, 0, 0, 0, tab, 0 as _, inst, ptr::null());
-                    put(edit, WM_SETFONT, ui::font(14, 400, "Segoe UI") as usize, 1);
+                    put(edit, WM_SETFONT, ui::font(14, 400, ui::ui_face()) as usize, 1);
                     EDIT_OLD.store(SetWindowLongPtrW(edit, GWLP_WNDPROC, edit_proc as *const () as isize), std::sync::atomic::Ordering::Relaxed);
                 }
                 let view = if desk() { LVS_ICON } else { LVS_REPORT };
@@ -954,7 +960,7 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
                     let (cw, ch) = (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
                     WALL.set((wall::load(cw, ch), cw, ch));
                     // grey (not ClearType) smoothing: on a live wallpaper the labels sit on a colour key, where ClearType leaves coloured fringes
-                    put(list, WM_SETFONT, windows_sys::Win32::Graphics::Gdi::CreateFontW(-ui::sc(13), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 4, 0, w("Segoe UI").as_ptr()) as usize, 1);
+                    put(list, WM_SETFONT, windows_sys::Win32::Graphics::Gdi::CreateFontW(-ui::sc(13), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 4, 0, w(ui::ui_face()).as_ptr()) as usize, 1);
                     // like explorer's desktop: wallpaper apps look for a SHELLDLL_DefView under Progman
                     CreateWindowExW(0, w("SHELLDLL_DefView").as_ptr(), ptr::null(), WS_CHILD, 0, 0, 0, 0, h, 0 as _, inst, ptr::null());
                     SetTimer(h, 7, 2000, None); // live wallpaper on / off (desk::check_live)
@@ -1197,7 +1203,7 @@ fn main() {
         let cls = w("RustExplorer");
         let desktop = env::args().nth(1).as_deref() == Some("--desktop");
         // desktop without a wallpaper file shows black, not window white
-        let bg = if desktop { GetStockObject(BLACK_BRUSH) as _ } else { windows_sys::Win32::Graphics::Gdi::CreateSolidBrush(ui::BG) };
+        let bg = if desktop { GetStockObject(BLACK_BRUSH) as _ } else { windows_sys::Win32::Graphics::Gdi::CreateSolidBrush(ui::pal().bg) };
         RegisterClassW(&WNDCLASSW { lpfnWndProc: Some(ui::proc), hInstance: inst, lpszClassName: w("RxChrome").as_ptr(), hCursor: LoadCursorW(0 as _, IDC_ARROW), ..std::mem::zeroed() });
         RegisterClassW(&WNDCLASSW { lpfnWndProc: Some(ui::nav_proc), hInstance: inst, lpszClassName: w("RxNav").as_ptr(), hCursor: LoadCursorW(0 as _, IDC_ARROW), ..std::mem::zeroed() });
         RegisterClassW(&WNDCLASSW { lpfnWndProc: Some(proc), hInstance: inst, lpszClassName: cls.as_ptr(), hCursor: LoadCursorW(0 as _, IDC_ARROW), hbrBackground: bg, ..std::mem::zeroed() });

@@ -7,16 +7,11 @@ use std::{cell::Cell, collections::HashMap, path::Path};
 use windows_sys::Win32::{Graphics::{Dwm::DwmSetWindowAttribute, Gdi::*}, System::{LibraryLoader::{GetProcAddress, LoadLibraryW}, SystemInformation::GetTickCount64}, UI::Input::KeyboardAndMouse::{GetFocus, TRACKMOUSEEVENT, TME_LEAVE, TrackMouseEvent}};
 
 pub const fn rgb(r: u8, g: u8, b: u8) -> u32 { r as u32 | (g as u32) << 8 | (b as u32) << 16 }
-pub const BG: u32 = rgb(24, 30, 44);
-pub const LISTBG: u32 = rgb(19, 24, 36);
-pub const PILL: u32 = rgb(16, 20, 30);
-pub const LINE: u32 = rgb(44, 52, 72);
-pub const HOVER: u32 = rgb(40, 48, 68);
-pub const ACTIVE: u32 = rgb(52, 61, 84);
-pub const ACCENT: u32 = rgb(76, 194, 255);
-pub const TEXT: u32 = rgb(255, 255, 255);
-pub const DIM: u32 = rgb(150, 158, 175);
-pub const OFF: u32 = rgb(80, 88, 105);
+// The colours come from the WinRust style the topbar gear picks (normal, terminal, dock, tiling): the same palette as the bar.
+pub use winrust_common::style::{pal, ui_face};
+pub fn listbg() -> u32 { mix(pal().bg, 0, 0.22) }
+pub fn pill() -> u32 { mix(pal().bg, 0, 0.35) }
+pub fn off() -> u32 { mix(pal().dim, pal().bg, 0.45) }
 
 pub const CHROME_H: i32 = 88;
 pub const STATUS_H: i32 = 26;
@@ -128,10 +123,10 @@ pub fn dark_title(h: HWND) {
     unsafe {
         let set = |attr: u32, v: i32| { DwmSetWindowAttribute(h, attr, &v as *const _ as _, 4); };
         set(20, 1); // immersive dark mode
-        set(33, 2); // round corners
-        set(35, BG as i32); // caption
-        set(36, TEXT as i32); // caption text
-        set(34, LINE as i32); // border
+        set(33, if winrust_common::style::style().square() { 1 } else { 2 }); // round corners, square in the terminal and tiling styles
+        set(35, pal().bg as i32); // caption
+        set(36, pal().text as i32); // caption text
+        set(34, pal().line as i32); // border
     }
 }
 
@@ -145,14 +140,37 @@ pub fn dark_mode() {
     }
 }
 
+/// The WinRust style changed (the topbar's broadcast): the lists take the new colours and font, everything repaints.
+pub unsafe fn restyle(h: HWND) {
+    unsafe extern "system" fn each(c: HWND, _: LPARAM) -> i32 {
+        let mut cls = [0u16; 32];
+        let n = GetClassNameW(c, cls.as_mut_ptr(), 32).max(0) as usize;
+        if String::from_utf16_lossy(&cls[..n]) == "SysListView32" {
+            style_list(c);
+        }
+        1
+    }
+    EnumChildWindows(h, Some(each), 0);
+    // the list rows' cached fonts and the title bar follow too
+    let (a, b) = FONTS.replace((0, 0));
+    for f in [a, b].into_iter().filter(|&f| f != 0) {
+        DeleteObject(f as HGDIOBJ);
+    }
+    dark_title(h);
+    // the window class was registered with the old background brush (shows while a pane resizes)
+    let old = SetClassLongPtrW(h, GCLP_HBRBACKGROUND, CreateSolidBrush(pal().bg) as isize);
+    DeleteObject(old as HGDIOBJ);
+    RedrawWindow(h, ptr::null(), ptr::null_mut(), RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);
+}
+
 /// Dark list: themed scrollbars and header, own colours and font, taller rows.
 pub fn style_list(list: HWND) {
     unsafe {
         SetWindowTheme(list, w("DarkMode_Explorer").as_ptr(), ptr::null());
         let hdr = SendMessageW(list, LVM_GETHEADER, 0, 0) as HWND;
         SetWindowTheme(hdr, w("DarkMode_ItemsView").as_ptr(), ptr::null());
-        for (m, c) in [(LVM_SETBKCOLOR, LISTBG), (LVM_SETTEXTBKCOLOR, LISTBG), (LVM_SETTEXTCOLOR, TEXT)] { SendMessageW(list, m, 0, c as isize); }
-        SendMessageW(list, WM_SETFONT, font(14, 400, "Segoe UI") as usize, 1);
+        for (m, c) in [(LVM_SETBKCOLOR, listbg()), (LVM_SETTEXTBKCOLOR, listbg()), (LVM_SETTEXTCOLOR, pal().text)] { SendMessageW(list, m, 0, c as isize); }
+        SendMessageW(list, WM_SETFONT, font(14, 400, ui_face()) as usize, 1);
         row_height(list, true);
         SetWindowSubclass(list, Some(list_sub), 1, 0); // paints the column header (the theme alone leaves it dim)
     }
@@ -203,14 +221,14 @@ pub unsafe fn list_draw(lp: LPARAM) -> LRESULT {
         CDDS_POSTPAINT => {
             if SendMessageW(list, LVM_GETITEMCOUNT, 0, 0) == 0 {
                 // an empty folder says so instead of showing a blank list
-                let (f_big, f_txt) = (font(40, 400, "Segoe MDL2 Assets") as HFONT, font(14, 400, "Segoe UI") as HFONT);
+                let (f_big, f_txt) = (font(40, 400, "Segoe MDL2 Assets") as HFONT, font(14, 400, ui_face()) as HFONT);
                 SetBkMode(dc, TRANSPARENT as i32);
                 let mid = cr.bottom / 3;
                 let of = SelectObject(dc, f_big);
-                text(dc, "\u{E8B7}", rc(0, mid - sc(40), cr.right, mid + sc(10)), mix(LISTBG, DIM, 0.5), DT_CENTER);
+                text(dc, "\u{E8B7}", rc(0, mid - sc(40), cr.right, mid + sc(10)), mix(listbg(), pal().dim, 0.5), DT_CENTER);
                 SelectObject(dc, f_txt);
                 let msg = if SEARCHING.with_borrow(|s| s.is_some()) { "Nothing found" } else { "This folder is empty" };
-                text(dc, msg, rc(0, mid + sc(14), cr.right, mid + sc(40)), DIM, DT_CENTER);
+                text(dc, msg, rc(0, mid + sc(14), cr.right, mid + sc(40)), pal().dim, DT_CENTER);
                 SelectObject(dc, of);
                 DeleteObject(f_big);
                 DeleteObject(f_txt);
@@ -230,7 +248,7 @@ pub unsafe fn list_draw(lp: LPARAM) -> LRESULT {
             let mut r = RECT { left: LVIR_BOUNDS as i32, ..std::mem::zeroed() };
             SendMessageW(list, LVM_GETITEMRECT, i, &mut r as *mut _ as isize);
             let row_r = rc(0, r.top, cr.right, r.bottom);
-            let b = CreateSolidBrush(LISTBG);
+            let b = CreateSolidBrush(listbg());
             FillRect(dc, &row_r, b);
             DeleteObject(b);
             let sel = SendMessageW(list, LVM_GETITEMSTATE, i, LVIS_SELECTED as isize) as u32 & LVIS_SELECTED != 0;
@@ -238,13 +256,13 @@ pub unsafe fn list_draw(lp: LPARAM) -> LRESULT {
             let focus = GetFocus() == list;
             let pill = rc(sc(6), r.top + sc(2), cr.right - sc(6), r.bottom - sc(2));
             let bg = match (sel, focus) {
-                (true, true) => mix(LISTBG, ACCENT, if hot { 0.26 } else { 0.20 }),
-                (true, false) => mix(LISTBG, TEXT, 0.10),
-                _ if hot => mix(LISTBG, TEXT, 0.055),
-                _ => LISTBG,
+                (true, true) => mix(listbg(), pal().accent, if hot { 0.26 } else { 0.20 }),
+                (true, false) => mix(listbg(), pal().text, 0.10),
+                _ if hot => mix(listbg(), pal().text, 0.055),
+                _ => listbg(),
             };
-            if bg != LISTBG { fill(dc, pill, bg, sc(10)); }
-            if sel { fill(dc, rc(pill.left, pill.top + sc(8), pill.left + sc(3), pill.bottom - sc(8)), if focus { ACCENT } else { DIM }, sc(3)); }
+            if bg != listbg() { fill(dc, pill, bg, sc(10)); }
+            if sel { fill(dc, rc(pill.left, pill.top + sc(8), pill.left + sc(3), pill.bottom - sc(8)), if focus { pal().accent } else { pal().dim }, sc(3)); }
             // columns from the header widths (left of the row = minus the horizontal scroll)
             let cw: Vec<i32> = (0..4).map(|k| SendMessageW(list, LVM_GETCOLUMNWIDTH, k, 0) as i32).collect();
             let x: Vec<i32> = (0..4).map(|k| r.left + cw[..k].iter().sum::<i32>()).collect();
@@ -252,16 +270,16 @@ pub unsafe fn list_draw(lp: LPARAM) -> LRESULT {
             let (mut iw, mut ih) = (0, 0);
             ImageList_GetIconSize(himl as _, &mut iw, &mut ih);
             if icon >= 0 { ImageList_Draw(himl as _, icon, dc, x[0] + sc(16), (r.top + r.bottom - ih) / 2, ILD_TRANSPARENT); }
-            if FONTS.get().0 == 0 { FONTS.set((font(14, 400, "Segoe UI"), font(13, 400, "Segoe UI"))); }
+            if FONTS.get().0 == 0 { FONTS.set((font(14, 400, ui_face()), font(13, 400, ui_face()))); }
             let (f_name, f_det) = FONTS.get();
             SetBkMode(dc, TRANSPARENT as i32);
             let of = SelectObject(dc, f_name as HFONT);
             let p = Path::new(&name);
             let hit_of_search = p.is_absolute(); // search hits are absolute paths: show the name, and where it lies in the type column
             let shown = if hit_of_search { p.file_name().map_or(name.clone(), |n| n.to_string_lossy().into_owned()) } else { name.clone() };
-            text(dc, &shown, rc(x[0] + sc(16) + iw + sc(12), r.top, x[1] - sc(8), r.bottom), TEXT, DT_LEFT);
+            text(dc, &shown, rc(x[0] + sc(16) + iw + sc(12), r.top, x[1] - sc(8), r.bottom), pal().text, DT_LEFT);
             SelectObject(dc, f_det as HFONT);
-            let dim = if sel { mix(DIM, TEXT, 0.45) } else { DIM };
+            let dim = if sel { mix(pal().dim, pal().text, 0.45) } else { pal().dim };
             text(dc, &friendly_date(time), rc(x[1] + sc(10), r.top, x[2] - sc(8), r.bottom), dim, DT_LEFT);
             let kind = if hit_of_search { p.parent().map_or(String::new(), |d| d.to_string_lossy().into_owned()) } else { type_text(&name, is_dir) };
             text(dc, &kind, rc(x[2] + sc(10), r.top, x[3] - sc(8), r.bottom), dim, DT_LEFT | DT_PATH_ELLIPSIS);
@@ -318,17 +336,17 @@ unsafe extern "system" fn list_sub(h: HWND, m: u32, wp: WPARAM, lp: LPARAM, _id:
         if nm.hdr.hwndFrom == hdr && nm.hdr.code == NM_CUSTOMDRAW {
             return match nm.dwDrawStage {
                 CDDS_PREPAINT => {
-                    let b = CreateSolidBrush(BG); // the bar behind the columns too
+                    let b = CreateSolidBrush(pal().bg); // the bar behind the columns too
                     FillRect(nm.hdc, &nm.rc, b);
                     DeleteObject(b);
                     CDRF_NOTIFYITEMDRAW as isize
                 }
                 CDDS_ITEMPREPAINT => {
                     let (dc, r, i) = (nm.hdc, nm.rc, nm.dwItemSpec);
-                    let b = CreateSolidBrush(BG);
+                    let b = CreateSolidBrush(pal().bg);
                     FillRect(dc, &r, b);
                     DeleteObject(b);
-                    fill(dc, rc(r.right - 1, r.top + sc(8), r.right, r.bottom - sc(8)), LINE, 0);
+                    fill(dc, rc(r.right - 1, r.top + sc(8), r.right, r.bottom - sc(8)), pal().line, 0);
                     let mut buf = [0u16; 128];
                     let mut it: HDITEMW = std::mem::zeroed();
                     it.mask = HDI_TEXT;
@@ -337,11 +355,11 @@ unsafe extern "system" fn list_sub(h: HWND, m: u32, wp: WPARAM, lp: LPARAM, _id:
                     SendMessageW(hdr, HDM_GETITEMW, i, &mut it as *mut _ as isize);
                     let sorted = SORT_COL.load(Relaxed) == i;
                     let arrow = if !sorted { "" } else if SORT_ASC.load(Relaxed) { "  \u{2191}" } else { "  \u{2193}" };
-                    let f = font(13, if sorted { 600 } else { 400 }, "Segoe UI") as HFONT;
+                    let f = font(13, if sorted { 600 } else { 400 }, ui_face()) as HFONT;
                     let of = SelectObject(dc, f);
                     SetBkMode(dc, TRANSPARENT as i32);
                     let align = if i == 3 { DT_RIGHT } else { DT_LEFT }; // the size column is right-aligned like its numbers
-                    text(dc, &format!("{}{arrow}", wstr(buf.as_ptr())), rc(r.left + sc(10), r.top, r.right - sc(12), r.bottom), if sorted { TEXT } else { DIM }, align);
+                    text(dc, &format!("{}{arrow}", wstr(buf.as_ptr())), rc(r.left + sc(10), r.top, r.right - sc(12), r.bottom), if sorted { pal().text } else { pal().dim }, align);
                     SelectObject(dc, of);
                     DeleteObject(f);
                     CDRF_SKIPDEFAULT as isize
@@ -414,6 +432,7 @@ pub fn gdiplus_start() {
 
 /// Fills `r` (right / bottom exclusive) in `c`; `rad` > 0 rounds the corners (rad = corner diameter), anti-aliased.
 unsafe fn fill(dc: HDC, r: RECT, c: u32, rad: i32) {
+    let rad = if winrust_common::style::style().square() { 0 } else { rad };
     use windows_sys::Win32::Graphics::GdiPlus::*;
     let (wd, ht) = ((r.right - r.left) as f32, (r.bottom - r.top) as f32);
     if wd <= 0.0 || ht <= 0.0 { return; }
@@ -457,7 +476,7 @@ unsafe fn text(dc: HDC, s: &str, mut r: RECT, c: u32, flags: u32) {
 /// A rounded highlight that eases in on hover and flashes in the accent colour on click; `base` is what it sits on.
 unsafe fn glow(dc: HDC, key: i32, r: RECT, base: u32, to: u32, rad: i32, on: bool) {
     let (t, p) = (hv(key, on), press_t(key));
-    if t > 0.01 || p > 0.0 { fill(dc, r, mix(mix(base, to, t), ACCENT, 0.45 * p), rad); }
+    if t > 0.01 || p > 0.0 { fill(dc, r, mix(mix(base, to, t), pal().accent, 0.45 * p), rad); }
 }
 
 unsafe fn paint_chrome(hwnd: HWND) {
@@ -471,13 +490,13 @@ unsafe fn paint_chrome(hwnd: HWND) {
     BUSY.set(false);
     let (dc, bmp) = (CreateCompatibleDC(wdc), CreateCompatibleBitmap(wdc, cr.right, cr.bottom));
     let old = SelectObject(dc, bmp);
-    let bg = CreateSolidBrush(BG);
+    let bg = CreateSolidBrush(pal().bg);
     FillRect(dc, &cr, bg);
     DeleteObject(bg);
     SetBkMode(dc, TRANSPARENT as i32);
     let l = layout(cr.right, labels.len());
     let hot = HOT.get();
-    let (f_txt, f_glyph, f_small) = (font(13, 400, "Segoe UI") as HFONT, font(16, 400, "Segoe MDL2 Assets") as HFONT, font(12, 400, "Segoe MDL2 Assets") as HFONT);
+    let (f_txt, f_glyph, f_small) = (font(13, 400, ui_face()) as HFONT, font(16, 400, "Segoe MDL2 Assets") as HFONT, font(12, 400, "Segoe MDL2 Assets") as HFONT);
     let of = SelectObject(dc, f_txt);
 
     // tabs
@@ -485,36 +504,36 @@ unsafe fn paint_chrome(hwnd: HWND) {
         let on = i == active;
         let (th, ta) = (hv(TAB + i as i32, hot == TAB + i as i32 || hot == CLOSE + i as i32), hv(1000 + i as i32, on));
         let p = press_t(TAB + i as i32);
-        fill(dc, *t, mix(mix(mix(BG, HOVER, th), ACTIVE, ta), ACCENT, 0.35 * p), sc(8));
-        if ta > 0.01 { fill(dc, rc(t.left + (t.right - t.left) / 2 - sc(12), t.bottom - sc(3), t.left + (t.right - t.left) / 2 + sc(12), t.bottom), mix(ACTIVE, ACCENT, ta), sc(3)); }
+        fill(dc, *t, mix(mix(mix(pal().bg, pal().hover, th), pal().active, ta), pal().accent, 0.35 * p), sc(8));
+        if ta > 0.01 { fill(dc, rc(t.left + (t.right - t.left) / 2 - sc(12), t.bottom - sc(3), t.left + (t.right - t.left) / 2 + sc(12), t.bottom), mix(pal().active, pal().accent, ta), sc(3)); }
         SelectObject(dc, f_txt);
-        text(dc, &labels[i], rc(t.left + sc(14), t.top, t.right - sc(if labels.len() > 1 { 30 } else { 10 }), t.bottom), mix(DIM, TEXT, ta.max(th)), DT_LEFT);
+        text(dc, &labels[i], rc(t.left + sc(14), t.top, t.right - sc(if labels.len() > 1 { 30 } else { 10 }), t.bottom), mix(pal().dim, pal().text, ta.max(th)), DT_LEFT);
         if labels.len() > 1 && (on || th > 0.05) {
             let c = l.close[i];
-            glow(dc, CLOSE + i as i32, c, mix(BG, ACTIVE, ta), HOVER, sc(6), hot == CLOSE + i as i32);
+            glow(dc, CLOSE + i as i32, c, mix(pal().bg, pal().active, ta), pal().hover, sc(6), hot == CLOSE + i as i32);
             SelectObject(dc, f_small);
-            text(dc, "\u{E711}", c, mix(DIM, TEXT, if hot == CLOSE + i as i32 { 1.0 } else { 0.4 }), DT_CENTER);
+            text(dc, "\u{E711}", c, mix(pal().dim, pal().text, if hot == CLOSE + i as i32 { 1.0 } else { 0.4 }), DT_CENTER);
         }
     }
-    glow(dc, PLUS, l.plus, BG, HOVER, sc(6), hot == PLUS);
+    glow(dc, PLUS, l.plus, pal().bg, pal().hover, sc(6), hot == PLUS);
     SelectObject(dc, f_small);
-    text(dc, "\u{E710}", l.plus, DIM, DT_CENTER);
+    text(dc, "\u{E710}", l.plus, pal().dim, DT_CENTER);
 
     // toolbar buttons
     SelectObject(dc, f_glyph);
     for (k, r, g, enabled) in [(BACK, l.back, "\u{E72B}", can_back), (FWD, l.fwd, "\u{E72A}", can_fwd), (UP, l.up, "\u{E74A}", true), (RELOAD, l.reload, "\u{E72C}", true), (SEARCH, l.search, "\u{E721}", true), (VIEW, l.view, if thumbs { "\u{E8FD}" } else { "\u{E80A}" }, true)] {
-        if enabled { glow(dc, k, r, BG, HOVER, sc(8), hot == k); }
-        text(dc, g, r, if enabled { TEXT } else { OFF }, DT_CENTER);
+        if enabled { glow(dc, k, r, pal().bg, pal().hover, sc(8), hot == k); }
+        text(dc, g, r, if enabled { pal().text } else { off() }, DT_CENTER);
     }
 
     // address pill: accent outline while it is being edited
     let focused = !edit.is_null() && GetFocus() == edit;
     let f = hv(2000, focused);
-    fill(dc, l.pill, mix(LINE, ACCENT, f), sc(18));
-    fill(dc, rc(l.pill.left + 1, l.pill.top + 1, l.pill.right - 1, l.pill.bottom - 1), PILL, sc(17));
+    fill(dc, l.pill, mix(pal().line, pal().accent, f), sc(18));
+    fill(dc, rc(l.pill.left + 1, l.pill.top + 1, l.pill.right - 1, l.pill.bottom - 1), pill(), sc(17));
     SelectObject(dc, f_glyph);
     let searching = SEARCHING.with_borrow(|s| s.clone());
-    text(dc, if searching.is_some() { "\u{E721}" } else { "\u{E838}" }, rc(l.pill.left + sc(10), l.pill.top, l.pill.left + sc(38), l.pill.bottom), mix(DIM, ACCENT, f), DT_CENTER);
+    text(dc, if searching.is_some() { "\u{E721}" } else { "\u{E838}" }, rc(l.pill.left + sc(10), l.pill.top, l.pill.left + sc(38), l.pill.bottom), mix(pal().dim, pal().accent, f), DT_CENTER);
     // not being edited: the path as clickable parts, like Windows 11 Explorer ("C: > Users > me"); the edit box is hidden
     let mut crumbs = vec![];
     if !focused {
@@ -522,7 +541,7 @@ unsafe fn paint_chrome(hwnd: HWND) {
         let (t, b) = (l.pill.top + sc(5), l.pill.bottom - sc(5));
         if let Some(q) = &searching {
             SelectObject(dc, f_txt);
-            text(dc, &format!("Results for \u{201C}{q}\u{201D}"), rc(x0 + sc(6), l.pill.top, x1, l.pill.bottom), ACCENT, DT_LEFT);
+            text(dc, &format!("Results for \u{201C}{q}\u{201D}"), rc(x0 + sc(6), l.pill.top, x1, l.pill.bottom), pal().accent, DT_LEFT);
         } else {
             let parts = crumbs_of(&dir);
             let width = |s: &str| { let mut r = rc(0, 0, 0, 0); DrawTextW(dc, w(s).as_ptr(), -1, &mut r, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX); r.right + sc(16) };
@@ -539,14 +558,14 @@ unsafe fn paint_chrome(hwnd: HWND) {
             let last = shown.len().saturating_sub(1);
             for (i, (label, path, wd)) in shown.into_iter().enumerate() {
                 let r = rc(x, t, (x + wd).min(x1), b);
-                glow(dc, CRUMB + i as i32, r, PILL, HOVER, sc(8), hot == CRUMB + i as i32);
+                glow(dc, CRUMB + i as i32, r, pill(), pal().hover, sc(8), hot == CRUMB + i as i32);
                 SelectObject(dc, f_txt);
-                text(dc, &label, r, if i == last { TEXT } else { mix(DIM, TEXT, if hot == CRUMB + i as i32 { 1.0 } else { 0.35 }) }, DT_CENTER);
+                text(dc, &label, r, if i == last { pal().text } else { mix(pal().dim, pal().text, if hot == CRUMB + i as i32 { 1.0 } else { 0.35 }) }, DT_CENTER);
                 crumbs.push((r, path));
                 x = r.right;
                 if i < last {
                     SelectObject(dc, f_small);
-                    text(dc, "\u{E76C}", rc(x, t, x + chev, b), mix(DIM, PILL, 0.3), DT_CENTER);
+                    text(dc, "\u{E76C}", rc(x, t, x + chev, b), mix(pal().dim, pill(), 0.3), DT_CENTER);
                     x += chev;
                 }
             }
@@ -554,7 +573,7 @@ unsafe fn paint_chrome(hwnd: HWND) {
     }
     CRUMBS.set(crumbs);
 
-    fill(dc, rc(0, cr.bottom - 1, cr.right, cr.bottom), LINE, 0); // hairline under the chrome
+    fill(dc, rc(0, cr.bottom - 1, cr.right, cr.bottom), pal().line, 0); // hairline under the chrome
     BitBlt(wdc, 0, 0, cr.right, cr.bottom, dc, 0, 0, SRCCOPY);
     SelectObject(dc, of);
     for f in [f_txt, f_glyph, f_small] { DeleteObject(f); }
@@ -572,10 +591,10 @@ pub unsafe fn paint_status(h: HWND) {
     let mut cr: RECT = std::mem::zeroed();
     GetClientRect(h, &mut cr);
     let strip = rc(0, cr.bottom - sc(STATUS_H), cr.right, cr.bottom);
-    let bg = CreateSolidBrush(BG);
+    let bg = CreateSolidBrush(pal().bg);
     FillRect(dc, &strip, bg);
     DeleteObject(bg);
-    fill(dc, rc(0, strip.top, cr.right, strip.top + 1), LINE, 0); // hairline above the status line
+    fill(dc, rc(0, strip.top, cr.right, strip.top + 1), pal().line, 0); // hairline above the status line
     let snap = ST.with(|c| {
         c.try_borrow().ok().map(|s| {
             // selected count and the total size of the selected files
@@ -598,11 +617,11 @@ pub unsafe fn paint_status(h: HWND) {
         };
         let by = ["Name", "Date", "Type", "Size"][SORT_COL.load(Relaxed).min(3)];
         let right = format!("{by} {}", if SORT_ASC.load(Relaxed) { "\u{2191}" } else { "\u{2193}" });
-        let f = font(12, 400, "Segoe UI") as HFONT;
+        let f = font(12, 400, ui_face()) as HFONT;
         let of = SelectObject(dc, f);
         SetBkMode(dc, TRANSPARENT as i32);
-        text(dc, &left, rc(strip.left + sc(14), strip.top, strip.right / 2, strip.bottom), DIM, DT_LEFT);
-        text(dc, &right, rc(strip.right / 2, strip.top, strip.right - sc(14), strip.bottom), DIM, DT_RIGHT);
+        text(dc, &left, rc(strip.left + sc(14), strip.top, strip.right / 2, strip.bottom), pal().dim, DT_LEFT);
+        text(dc, &right, rc(strip.right / 2, strip.top, strip.right - sc(14), strip.bottom), pal().dim, DT_RIGHT);
         SelectObject(dc, of);
         DeleteObject(f);
     }
@@ -673,9 +692,9 @@ pub unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> L
         WM_CTLCOLOREDIT => {
             // the address box: white text on the pill's colour
             let dc = wp as HDC;
-            SetTextColor(dc, TEXT);
-            SetBkColor(dc, PILL);
-            if BRUSH.get() == 0 { BRUSH.set(CreateSolidBrush(PILL) as isize); }
+            SetTextColor(dc, pal().text);
+            SetBkColor(dc, pill());
+            if BRUSH.get() == 0 { BRUSH.set(CreateSolidBrush(pill()) as isize); }
             return BRUSH.get();
         }
         _ => return DefWindowProcW(h, m, wp, lp),
@@ -777,11 +796,11 @@ unsafe fn paint_nav(hwnd: HWND) {
     BUSY.set(false);
     let (dc, bmp) = (CreateCompatibleDC(wdc), CreateCompatibleBitmap(wdc, cr.right.max(1), cr.bottom.max(1)));
     let old = SelectObject(dc, bmp);
-    let bg = CreateSolidBrush(BG);
+    let bg = CreateSolidBrush(pal().bg);
     FillRect(dc, &cr, bg);
     DeleteObject(bg);
     SetBkMode(dc, TRANSPARENT as i32);
-    let (f_txt, f_head, f_glyph, f_small) = (font(13, 400, "Segoe UI") as HFONT, font(12, 600, "Segoe UI") as HFONT, font(16, 400, "Segoe MDL2 Assets") as HFONT, font(11, 400, "Segoe UI") as HFONT);
+    let (f_txt, f_head, f_glyph, f_small) = (font(13, 400, ui_face()) as HFONT, font(12, 600, ui_face()) as HFONT, font(16, 400, "Segoe MDL2 Assets") as HFONT, font(11, 400, ui_face()) as HFONT);
     let of = SelectObject(dc, f_txt);
     // where we are = the deepest item that contains the current folder
     let cur = ST.with(|c| c.try_borrow().ok().map(|s| s.dir.to_string_lossy().to_lowercase())).unwrap_or_default();
@@ -792,7 +811,7 @@ unsafe fn paint_nav(hwnd: HWND) {
         for (i, it) in n.iter().enumerate() {
             if it.path.as_os_str().is_empty() {
                 SelectObject(dc, f_head);
-                text(dc, &it.title.to_uppercase(), rc(sc(18), y + sc(6), cr.right - sc(8), y + sc(NAV_HEAD)), DIM, DT_LEFT);
+                text(dc, &it.title.to_uppercase(), rc(sc(18), y + sc(6), cr.right - sc(8), y + sc(NAV_HEAD)), pal().dim, DT_LEFT);
                 y += sc(NAV_HEAD);
                 continue;
             }
@@ -800,28 +819,28 @@ unsafe fn paint_nav(hwnd: HWND) {
             let r = rc(sc(8), y, cr.right - sc(8), y + hgt);
             let (th, ta) = (hv(5000 + i as i32, hot == i as i32), hv(6000 + i as i32, here == Some(i)));
             let p = press_t(5000 + i as i32);
-            if th.max(ta) > 0.01 || p > 0.0 { fill(dc, r, mix(mix(mix(BG, HOVER, th), ACTIVE, ta), ACCENT, 0.3 * p), sc(10)); }
-            if ta > 0.01 { fill(dc, rc(r.left, y + sc(10), r.left + sc(3), y + hgt - sc(10)), mix(ACTIVE, ACCENT, ta), sc(3)); }
+            if th.max(ta) > 0.01 || p > 0.0 { fill(dc, r, mix(mix(mix(pal().bg, pal().hover, th), pal().active, ta), pal().accent, 0.3 * p), sc(10)); }
+            if ta > 0.01 { fill(dc, rc(r.left, y + sc(10), r.left + sc(3), y + hgt - sc(10)), mix(pal().active, pal().accent, ta), sc(3)); }
             let line = rc(r.left, y, r.right, y + sc(NAV_ROW)); // the title line (a drive has its usage bar below it)
             SelectObject(dc, f_glyph);
-            text(dc, it.glyph, rc(r.left + sc(10), line.top, r.left + sc(40), line.bottom), mix(DIM, ACCENT, ta), DT_CENTER);
+            text(dc, it.glyph, rc(r.left + sc(10), line.top, r.left + sc(40), line.bottom), mix(pal().dim, pal().accent, ta), DT_CENTER);
             SelectObject(dc, f_txt);
-            text(dc, &it.title, rc(r.left + sc(48), line.top, r.right - sc(8), line.bottom), mix(DIM, TEXT, ta.max(th)), DT_LEFT);
+            text(dc, &it.title, rc(r.left + sc(48), line.top, r.right - sc(8), line.bottom), mix(pal().dim, pal().text, ta.max(th)), DT_LEFT);
             if let Some((free, total)) = it.cap {
                 // usage bar like Windows' "This PC": accent, red once the drive is more than 90 % full
                 let used = 1.0 - free as f32 / total as f32;
                 let bar = rc(r.left + sc(48), y + sc(30), r.right - sc(14), y + sc(34));
-                fill(dc, bar, mix(BG, TEXT, 0.12), sc(4));
+                fill(dc, bar, mix(pal().bg, pal().text, 0.12), sc(4));
                 let fw = ((bar.right - bar.left) as f32 * used) as i32;
-                fill(dc, rc(bar.left, bar.top, bar.left + fw.max(sc(4)), bar.bottom), if used > 0.9 { rgb(255, 99, 97) } else { ACCENT }, sc(4));
+                fill(dc, rc(bar.left, bar.top, bar.left + fw.max(sc(4)), bar.bottom), if used > 0.9 { rgb(255, 99, 97) } else { pal().accent }, sc(4));
                 SelectObject(dc, f_small);
                 let gb = |b: u64| b as f64 / 1_073_741_824.0;
-                text(dc, &format!("{:.0} GB free of {:.0} GB", gb(free), gb(total)), rc(bar.left, bar.bottom + sc(1), r.right - sc(8), y + hgt - sc(2)), DIM, DT_LEFT);
+                text(dc, &format!("{:.0} GB free of {:.0} GB", gb(free), gb(total)), rc(bar.left, bar.bottom + sc(1), r.right - sc(8), y + hgt - sc(2)), pal().dim, DT_LEFT);
             }
             y += hgt;
         }
     });
-    fill(dc, rc(cr.right - 1, 0, cr.right, cr.bottom), LINE, 0); // hairline between the pane and the list
+    fill(dc, rc(cr.right - 1, 0, cr.right, cr.bottom), pal().line, 0); // hairline between the pane and the list
     BitBlt(wdc, 0, 0, cr.right, cr.bottom, dc, 0, 0, SRCCOPY);
     SelectObject(dc, of);
     for f in [f_txt, f_head, f_glyph, f_small] { DeleteObject(f); }

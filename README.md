@@ -18,7 +18,7 @@ English | [Русский](README.ru.md)
 
 **Update:** download the new `WinRust.exe` from the releases page, run it as administrator and press **Update WinRust**. Installed plugins are updated, missing ones installed; your settings and the saved original Windows values stay.
 
-The installer is in English. The **Русский** button in its corner (or "Language" in the bar's right-click menu) switches every WinRust program to Russian.
+The installer is in English. The **Русский** button in its corner (or "WinRust apps in Русский" in the bar's right-click menu) switches every WinRust program to Russian.
 
 ## Remove
 
@@ -40,6 +40,19 @@ The installer is in English. The **Русский** button in its corner (or "La
 | chrome-rs | A browser | Not installable yet |
 
 Every change is reversible: uninstall puts back the values that were there before.
+
+## Styles
+
+The gear at the left end of the bar opens **Style**. The choice applies at once to the bar, the file manager (rust-explorer) and the search window (Alt+Space):
+
+| Style | Look |
+|---|---|
+| **Normal** | Windows 11 blue, the bar at the bottom |
+| **Terminal** | Green on black, Consolas, square corners |
+| **Floating dock** | A pill-shaped bar in the middle; maximized windows get the whole screen, the dock slides away over them and comes back at the bottom edge |
+| **Tiling** | A thin bar at the top, amber accent, square corners; "Tile the windows" puts the open windows side by side |
+
+The choice is stored in `%ProgramData%\WinRust\style.txt`.
 
 ## Benchmark
 
@@ -83,7 +96,7 @@ src/            the installer (plugin-launcher.exe)
   main.rs         the plugin table PLUGINS: name, texts, install/uninstall pair, icon
   install/        what each plugin changes and how it is undone (one file per plugin)
   cli.rs, ui.rs   the command line and the window; both call the same install functions
-common/         winrust-common: language switch (t!/tf!) and the NTFS MFT reader, shared by the programs
+common/         winrust-common: language switch (t!/tf!), UI styles and palettes, reg.exe output parser, NTFS MFT reader
 plugins/        sources of every plugin, each its own crate
 ReShell/        reshell (desktop hotkeys, topbar safety net), ships with topbar
 payload.txt     the exes embedded into the installer, and where the build puts them

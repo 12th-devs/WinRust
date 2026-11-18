@@ -154,7 +154,7 @@ dependencies = [
 
 [[package]]
 name = "plugin-launcher"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "embed-resource",
  "windows-sys",
@@ -223,6 +223,7 @@ dependencies = [
  "windows",
  "windows-core",
  "windows-sys",
+ "winrust-common",
 ]
 
 [[package]]
