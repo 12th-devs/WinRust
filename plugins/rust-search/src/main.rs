@@ -568,9 +568,15 @@ fn install_dir() -> std::path::PathBuf {
 /// Runs `rs --serve` for every fixed NTFS drive at boot, as SYSTEM, from Program Files (admin-only writable:
 /// a SYSTEM task must never run a binary from a user-writable folder). The installing user gets the pipes.
 fn install() -> Result<(), String> {
-    let who = ps("whoami /user /fo csv /nh")?;
-    let sid = who.trim().rsplit('"').nth(1).unwrap_or("").to_string(); // "DOM\user","S-1-5-..."
-    if !sid.starts_with("S-1-") || !sid.chars().all(|c| c.is_ascii_digit() || c == '-' || c == 'S') {
+    // the installer passes the signed-in user's SID when UAC was answered with another administrator
+    let (sid, who) = match env::var(winrust_common::reg::SID_ENV).ok().filter(|s| winrust_common::reg::valid_sid(s)) {
+        Some(sid) => (sid, String::new()),
+        None => {
+            let who = ps("whoami /user /fo csv /nh")?;
+            (who.trim().rsplit('"').nth(1).unwrap_or("").to_string(), who) // "DOM\user","S-1-5-..."
+        }
+    };
+    if !winrust_common::reg::valid_sid(&sid) {
         return Err(format!("cannot determine your SID from: {who}"));
     }
     let drives = fixed_ntfs_drives();

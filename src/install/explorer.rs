@@ -82,7 +82,7 @@ pub(crate) fn rx_install() -> Result<(), String> {
         }
         // A logon task starts the overlay right at sign-in; Explorer runs the Run key only after its own startup delay (~20 s of
         // plain Windows on screen). Limited run level: the shell side must never run elevated. Fallback: the Run key.
-        let task = format!("$u=[Security.Principal.WindowsIdentity]::GetCurrent().Name; Register-ScheduledTask -TaskName rs-overlay -Force -Action (New-ScheduledTaskAction -Execute '{}' -Argument '--overlay') -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $u) -Principal (New-ScheduledTaskPrincipal -UserId $u -LogonType Interactive -RunLevel Limited) -Settings (New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)) | Out-Null", sh.display());
+        let task = format!("{} Register-ScheduledTask -TaskName rs-overlay -Force -Action (New-ScheduledTaskAction -Execute '{}' -Argument '--overlay') -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $u) -Principal (New-ScheduledTaskPrincipal -UserId $u -LogonType Interactive -RunLevel Limited) -Settings (New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)) | Out-Null", task_user(), sh.display());
         if run("powershell", &["-NoProfile", "-Command", &task]).is_ok() {
             let _ = run("reg", &["delete", RUN_KEY, "/v", "rs-overlay", "/f"]);
         } else {
@@ -92,6 +92,8 @@ pub(crate) fn rx_install() -> Result<(), String> {
         run("reg", &["add", RX_SWITCH, "/v", "ReplaceExplorer", "/t", "REG_DWORD", "/d", "1", "/f"])?;
         run("reg", &["add", WINLOGON_KEY, "/v", "AutoRestartShell", "/t", "REG_DWORD", "/d", "0", "/f"])?;
         rx_trim(true);
+        // the bar's Start panel and the search list Start Menu shortcuts only: without one rust-explorer has no entry (and no icon) there
+        soft(t!("ярлык «Rust Explorer» в меню Пуск не создан", "Start menu shortcut 'Rust Explorer' was not created"), shortcut(&start_lnk("Rust Explorer"), &fm, ""));
         // Start it now, with the user's normal token: explorer.exe opens a shortcut unelevated, and the shortcut carries --overlay.
         let lnk = rx_lnk();
         let _ = fs::create_dir_all(lnk.parent().unwrap());
@@ -121,6 +123,7 @@ pub(crate) fn rx_uninstall() -> Result<(), String> {
     }
     let _ = run("powershell", &["-NoProfile", "-Command", r#"if (-not (Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" | Where-Object { $_.CommandLine -match '(?i)explorer\.exe"?\s*$' })) { runas /trustlevel:0x20000 C:\Windows\explorer.exe }"#]);
     let _ = fs::remove_file(rx_lnk());
+    let _ = fs::remove_file(start_lnk("Rust Explorer"));
     let _ = fs::remove_dir_all(rx_dir());
     if r.is_ok() {
         let _ = run("reg", &["delete", RX_STATE, "/f"]);

@@ -18,9 +18,39 @@ pub fn dword(out: &str) -> Option<u32> {
     }
 }
 
+/// Set by the installer for its children when the signed-in user is not the elevated account (UAC was answered with another
+/// administrator): the SID of the signed-in user. Per-user keys then go to `HKU\<sid>`, not to the elevated account's HKCU.
+pub const SID_ENV: &str = "WINRUST_SID";
+
+pub fn valid_sid(s: &str) -> bool {
+    s.starts_with("S-1-") && s.len() > 4 && s.chars().all(|c| c.is_ascii_digit() || c == '-' || c == 'S')
+}
+
+/// A reg.exe key argument aimed at the user `sid`: `HKCU\x` becomes `HKU\<sid>\x`. Anything else (HKLM, values, flags) is unchanged.
+pub fn for_user(arg: &str, sid: &str) -> String {
+    let rest = ["HKCU", "HKEY_CURRENT_USER"].iter().find_map(|p| arg.strip_prefix(p).filter(|r| r.is_empty() || r.starts_with('\\')));
+    rest.map_or_else(|| arg.to_string(), |r| format!("HKU\\{sid}{r}"))
+}
+
+/// `for_user` for the SID the installer passed in the environment; the arguments as they are when it passed none.
+pub fn user_args(args: &[&str]) -> Vec<String> {
+    let sid = std::env::var(SID_ENV).ok().filter(|s| valid_sid(s));
+    args.iter().map(|a| sid.as_deref().map_or_else(|| a.to_string(), |s| for_user(a, s))).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn aims_hkcu_at_the_given_user() {
+        assert_eq!(for_user(r"HKCU\Software\X", "S-1-5-21-1-2-3-1001"), r"HKU\S-1-5-21-1-2-3-1001\Software\X");
+        assert_eq!(for_user("HKEY_CURRENT_USER", "S-1-5-21-9"), r"HKU\S-1-5-21-9");
+        assert_eq!(for_user(r"HKLM\SOFTWARE\X", "S-1-5-21-9"), r"HKLM\SOFTWARE\X");
+        assert_eq!(for_user(r"HKCUX\a", "S-1-5-21-9"), r"HKCUX\a");
+        assert_eq!(for_user("/v", "S-1-5-21-9"), "/v");
+        assert!(valid_sid("S-1-5-21-1-2-3-1001") && !valid_sid("S-1-5-x; calc") && !valid_sid(""));
+    }
 
     #[test]
     fn reads_reg_query_output() {

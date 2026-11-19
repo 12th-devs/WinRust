@@ -114,11 +114,23 @@ pub(crate) const ID_CANCEL: usize = 3;
 pub(crate) const ID_SWITCH: usize = 4;
 pub(crate) const ID_GEAR: usize = 5;
 pub(crate) const ID_LANG: usize = 6; // EN / RU switch
+pub(crate) const ID_CHECK: usize = 100; // + plugin index: the row's checkbox
 pub(crate) const STARTING: usize = usize::MAX - 1; // JOB before install_all picks its first component
 
 /// Installable components, in install order (topbar comes before rust-explorer, which needs it).
 pub(crate) fn ready() -> impl Iterator<Item = usize> {
     (0..PLUGINS.len()).filter(|&i| PLUGINS[i].actions.is_some() && PLUGINS[i].bulk)
+}
+
+/// The components the checkboxes have ticked, in install order.
+pub(crate) fn chosen() -> impl Iterator<Item = usize> {
+    ready().filter(|&i| SELECTED[i].load(Relaxed))
+}
+
+/// Checkbox at the left end of row `k`, and the larger area that toggles it.
+pub(crate) fn check_box(k: usize, w: f32) -> (Box4, Box4) {
+    let r = row_box(k, w);
+    ([r[0] + 12.0, r[1] + 22.0, r[0] + 30.0, r[1] + 40.0], [r[0] + 4.0, r[1] + 8.0, r[0] + 38.0, r[3] - 8.0])
 }
 
 pub(crate) fn row_box(k: usize, w: f32) -> Box4 {
@@ -216,14 +228,16 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
 
     // component list
     ui.round([M, LIST_TOP, w - M, LIST_TOP + LIST_H], 12.0, PANEL, BORDER);
-    let pos = ready().position(|i| i == job); // where install_all is now
+    let pos = chosen().position(|i| i == job); // where install_all is now
+    let n_sel = chosen().count();
+    let n_sel_inst = chosen().filter(|&i| INSTALLED[i].load(Relaxed)).count();
     let gear = gear_box(w);
     for (k, i) in ready().enumerate() {
         let p = &PLUGINS[i];
         let r = row_box(k, w);
         let installed = INSTALLED[i].load(Relaxed);
         let working = busy && (job == i || (job == n && installed));
-        let queued = busy && !installed && (job == STARTING || pos.is_some_and(|q| k > q));
+        let queued = busy && !installed && SELECTED[i].load(Relaxed) && (job == STARTING || ready().position(|j| j == job).is_some_and(|q| k > q));
         if k > 0 {
             ui.shape([r[0] + 12.0, r[1], r[2] - 12.0, r[1] + 1.0 / s], 0.0, argb(BORDER, 255));
         }
@@ -231,7 +245,13 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
             let t = lerp(PANEL, ACCENT, 0.10);
             ui.round([r[0], r[1] + 3.0, r[2], r[3] - 3.0], 9.0, t, t);
         }
-        let tile = [r[0] + 10.0, r[1] + 13.0, r[0] + 46.0, r[1] + 49.0];
+        let (cb, _) = check_box(k, w);
+        let sel = SELECTED[i].load(Relaxed);
+        ui.round(cb, 5.0, if sel { ACCENT } else { PANEL }, if sel { ACCENT } else { lerp(BORDER, TEXT, if hot(ID_CHECK + i) { 0.4 } else { 0.0 }) });
+        if sel {
+            ui.text_in("\u{E73E}", cb, 11.0, 700, rgb(255, 255, 255), DT_CENTER | DT_VCENTER | DT_SINGLELINE, "Segoe MDL2 Assets");
+        }
+        let tile = [r[0] + 42.0, r[1] + 13.0, r[0] + 78.0, r[1] + 49.0];
         let lit = installed || working;
         let tint = if lit { lerp(PANEL, ACCENT, 0.20) } else { lerp(PANEL, TEXT, 0.06) };
         ui.round(tile, 9.0, tint, tint);
@@ -271,26 +291,30 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     if busy {
         let base = lerp(PANEL, ACCENT, 0.22);
         ui.round(mb, 12.0, base, base);
-        let done = if job == n { 0.0 } else { pos.map_or(0.0, |q| (q as f32 + 0.5) / N_READY as f32) };
+        let done = if job == n { 0.0 } else { pos.map_or(0.0, |q| (q as f32 + 0.5) / n_sel as f32) };
         if done > 0.0 {
             ui.shape([mb[0], mb[1], mb[0] + (mb[2] - mb[0]) * done, mb[3]], 12.0, argb(ACCENT, 255));
         }
         let label = if job == n {
             t!("Удаление WinRust…", "Removing WinRust…").to_string()
         } else {
-            pos.map_or(t!("Подготовка…", "Preparing…").into(), |q| tf!("Устанавливается {}  ({} из {N_READY})", "Installing {}  ({} of {N_READY})", PLUGINS[job].name, q + 1))
+            pos.map_or(t!("Подготовка…", "Preparing…").into(), |q| tf!("Устанавливается {}  ({} из {})", "Installing {}  ({} of {})", PLUGINS[job].name, q + 1, n_sel))
         };
         ui.text(&label, mb, 15.5, 700, TEXT, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     } else {
-        let all = n_inst == N_READY;
-        let label = if all {
+        let all = n_sel_inst == n_sel && n_sel > 0;
+        let label = if n_sel == 0 {
+            t!("Отметьте компоненты", "Tick the components").to_string()
+        } else if n_sel < N_READY {
+            if all { tf!("Обновить выбранное  ({n_sel})", "Update selected  ({n_sel})") } else { tf!("Установить выбранное  ({n_sel})", "Install selected  ({n_sel})") }
+        } else if all {
             t!("Обновить WinRust", "Update WinRust").to_string()
         } else if n_inst == 0 {
             t!("Установить WinRust", "Install WinRust").into()
         } else {
             tf!("Доустановить и обновить WinRust  (новых: {})", "Install and update WinRust  ({} new)", N_READY - n_inst)
         };
-        let (fill, fg) = if all { (PANEL, TEXT) } else { (ACCENT, rgb(255, 255, 255)) };
+        let (fill, fg) = if all || n_sel == 0 { (PANEL, if n_sel == 0 { DIM } else { TEXT }) } else { (ACCENT, rgb(255, 255, 255)) };
         let fill = if hot(ID_MAIN) { lerp(fill, TEXT, if all { 0.07 } else { 0.14 }) } else { fill };
         ui.round(mb, 12.0, fill, if all { BORDER } else { fill });
         let tw = ui.width(&label, 16.0, 700);
@@ -411,6 +435,9 @@ pub(crate) unsafe fn hit(hwnd: HWND, lp: isize) -> Option<usize> {
     if gear_box(w).is_some_and(|(i, b)| INSTALLED[i].load(Relaxed) && inside(b)) {
         return Some(ID_GEAR);
     }
+    if let Some(i) = ready().enumerate().find_map(|(k, i)| inside(check_box(k, w).1).then_some(i)) {
+        return Some(ID_CHECK + i);
+    }
     if inside(lang_box(w)) {
         return Some(ID_LANG);
     }
@@ -439,21 +466,26 @@ pub(crate) fn start(hwnd: HWND, which: usize, job: impl FnOnce() -> Result<Strin
 }
 
 /// One click: every component in order; missing ones are installed, installed ones updated from this installer.
-/// Stops at the first failure: rust-explorer must not go on without topbar. `h` = window to repaint between steps.
+/// Only the ticked ones. A failed or skipped one does not stop the others (rust-explorer refuses by itself while topbar is
+/// missing); the failures are listed at the end. `h` = window to repaint between steps.
 pub(crate) fn install_all(h: isize) -> Result<String, String> {
-    let all = ready().all(|i| (PLUGINS[i].installed)());
-    let (mut done, mut warned) = (Vec::new(), false);
-    for i in ready() {
+    let all = chosen().all(|i| (PLUGINS[i].installed)());
+    let (mut done, mut failed, mut warned) = (Vec::new(), Vec::new(), false);
+    for i in chosen() {
         // installed ones are updated too: a newer installer must bring its fixes to them, not only add what is missing
         JOB.store(i, Relaxed);
         unsafe { InvalidateRect(h as HWND, null(), 0) };
         if let Err(e) = install_plugin(i) {
-            let ok = if done.is_empty() { String::new() } else { tf!(" Уже готово: {}.", " Already done: {}.", done.join(", ")) };
-            return Err(format!("{}: {e}.{ok}", PLUGINS[i].name));
+            failed.push(format!("{}: {e}", PLUGINS[i].name));
+            continue;
         }
         warned |= !WARN.lock().unwrap().is_empty(); // install_plugin clears the list for each component
         done.push(PLUGINS[i].name);
         refresh();
+    }
+    if !failed.is_empty() {
+        let ok = if done.is_empty() { String::new() } else { tf!(" Готово: {}.", " Done: {}.", done.join(", ")) };
+        return Err(format!("{}.{ok}", failed.join("; ")));
     }
     let note = if warned { t!(" Есть предупреждения (см. %ProgramData%\\plugin-launcher\\install.log).", " There are warnings (see %ProgramData%\\plugin-launcher\\install.log).") } else { "" };
     Ok(format!("WinRust {}: {}.{note}", if all { t!("обновлён", "updated") } else { t!("установлен", "installed") }, done.join(", ")))
@@ -501,6 +533,11 @@ pub(crate) unsafe fn click(hwnd: HWND, id: usize) {
         return;
     }
     match id {
+        i if i >= ID_CHECK => {
+            SELECTED[i - ID_CHECK].fetch_xor(true, Relaxed);
+            InvalidateRect(hwnd, null(), 0);
+        }
+        ID_MAIN if chosen().next().is_none() => {}
         ID_LANG => {
             i18n::set_english(!i18n::english());
             HOVER.set(None);
@@ -518,10 +555,17 @@ pub(crate) unsafe fn click(hwnd: HWND, id: usize) {
             danger: true,
             act: Act::Rollback,
         }),
-        ID_MAIN if ready().all(|i| INSTALLED[i].load(Relaxed)) => ask(hwnd, Dialog {
+        ID_MAIN if chosen().all(|i| INSTALLED[i].load(Relaxed)) => ask(hwnd, Dialog {
             title: t!("Обновить WinRust?", "Update WinRust?").into(),
             text: t!("Все компоненты будут переустановлены из этой версии установщика. Настройки сохранятся.", "All components will be reinstalled from this version of the installer. Settings are kept.").into(),
             ok: t!("Обновить", "Update").into(),
+            danger: false,
+            act: Act::InstallAll,
+        }),
+        ID_MAIN if chosen().count() < N_READY => ask(hwnd, Dialog {
+            title: t!("Установить выбранное?", "Install the selected?").into(),
+            text: tf!("Будет установлено или обновлено: {}.\n\nКомпоненты меняют систему (подробности в описании каждого). Создаётся точка восстановления, «Удалить всё» вернёт систему.", "To be installed or updated: {}.\n\nThe components change the system (see each one's description). A restore point is created, 'Remove all' restores the system.", chosen().map(|i| PLUGINS[i].name).collect::<Vec<_>>().join(", ")).into(),
+            ok: t!("Установить", "Install").into(),
             danger: false,
             act: Act::InstallAll,
         }),

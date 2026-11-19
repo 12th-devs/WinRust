@@ -1323,7 +1323,7 @@ fn main() {
     if std::env::args().nth(1).as_deref() == Some("--autostart") {
         let exe = std::env::current_exe().unwrap();
         let ok = std::process::Command::new("reg")
-            .args(["add", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "rs-launcher", "/t", "REG_SZ", "/d", &format!("\"{}\"", exe.display()), "/f"])
+            .args(winrust_common::reg::user_args(&["add", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "rs-launcher", "/t", "REG_SZ", "/d", &format!("\"{}\"", exe.display()), "/f"]))
             .status()
             .map(|s| s.success())
             .unwrap_or(false);

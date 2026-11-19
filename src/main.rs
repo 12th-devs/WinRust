@@ -146,6 +146,16 @@ const PLUGINS: &[Plugin] = &[
         bulk: false, // changes system behaviour: only on request, never as part of "install everything"
         glyph: "\u{E74D}", // delete
     },
+    Plugin {
+        name: "purge",
+        desc: Tr("БЕЗВОЗВРАТНО удаляет предустановленный мусор, как Tiny11: Clipchamp, Новости, Погода, Xbox-оверлеи, Teams, Cortana, виджеты, Skype, Solitaire и др., а также задачи телеметрии. Отката нет.", "PERMANENTLY removes the bundled junk like Tiny11 does: Clipchamp, News, Weather, Xbox overlays, Teams, Cortana, Widgets, Skype, Solitaire and more, plus telemetry tasks. There is no undo."),
+        warn: Tr("НЕОБРАТИМО: приложения будут удалены для всех пользователей и из образа (новые пользователи их тоже не получат), задачи телеметрии удалены. Вернуть можно только из Store или winget. Магазин, Параметры, Пуск, Калькулятор, Фото и среды выполнения не затрагиваются. OneDrive и Edge не входят: purge.exe --apply --onedrive --edge. Сначала посмотрите список: purge.exe без параметров ничего не меняет.", "IRREVERSIBLE: apps are removed for all users and from the image (new users will not get them), telemetry tasks are deleted. They come back only from the Store or winget. The Store, Settings, Start, Calculator, Photos and runtimes are not touched. OneDrive and Edge are not included: purge.exe --apply --onedrive --edge. Look at the list first: purge.exe with no arguments changes nothing."),
+        installed: || pu_dir().join("purge.exe").is_file(),
+        actions: Some((pu_install, pu_uninstall)),
+        settings: false,
+        bulk: false, // destructive and permanent: only on request, never as part of "install everything"
+        glyph: "\u{E74D}", // delete
+    },
     Plugin { name: "chrome-rs", desc: Tr("Браузер на Rust. Установка пока недоступна (заглушка).", "A browser in Rust. Installation is not available yet (placeholder)."), warn: Tr("", ""), installed: || false, actions: None, settings: false, bulk: true, glyph: "\u{E774}" }, // globe
 ];
 
@@ -157,6 +167,8 @@ fn refresh() {
         f.store((p.installed)(), Relaxed);
     }
 }
+// which components the window's checkboxes have ticked (all by default); the one button installs / updates only these
+static SELECTED: [AtomicBool; PLUGINS.len()] = [const { AtomicBool::new(true) }; PLUGINS.len()];
 static MSG: Mutex<(String, bool)> = Mutex::new((String::new(), true));
 thread_local! { static SETTINGS: Cell<Option<usize>> = const { Cell::new(None) }; } // plugin whose settings panel is open
 thread_local! { static HOVER: Cell<Option<usize>> = const { Cell::new(None) }; }

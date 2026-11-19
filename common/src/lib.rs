@@ -11,6 +11,7 @@ use std::{
 pub mod desktop;
 pub mod mft;
 pub mod reg;
+pub mod settings;
 pub mod style;
 
 static LANG: AtomicU8 = AtomicU8::new(0); // 0 = not read yet, 1 = English, 2 = Russian

@@ -11,3 +11,4 @@ rs-shell.exe = target/release/rs-shell.exe
 wiztree.exe = target/release/wiztree.exe
 photoview.exe = target/release/photoview.exe
 debloat.exe = target/release/debloat.exe
+purge.exe = target/release/purge.exe

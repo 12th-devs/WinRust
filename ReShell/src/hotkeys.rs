@@ -4,7 +4,7 @@
 //! No undocumented COM: the current desktop comes from the registry, switching sends Ctrl+Win+Left/Right
 //! (Win is already held by the user). shortcut: relies on the system shortcuts being enabled.
 use std::sync::atomic::{AtomicIsize, AtomicU32, AtomicUsize, Ordering::Relaxed};
-use windows_sys::Win32::{Foundation::*, System::{Com::{COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx}, LibraryLoader::GetModuleHandleW, Registry::*}, UI::{Input::KeyboardAndMouse::*, Shell::ShellExecuteW, WindowsAndMessaging::*}};
+use windows_sys::Win32::{Foundation::*, System::{LibraryLoader::GetModuleHandleW, Registry::*}, UI::{Input::KeyboardAndMouse::*, WindowsAndMessaging::*}};
 
 static PREV: AtomicUsize = AtomicUsize::new(usize::MAX);
 static HOOK: AtomicIsize = AtomicIsize::new(0);
@@ -49,13 +49,8 @@ fn open_files() {
     let _ = Command::new(exe).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
 }
 
-/// Win+I: the Settings app through its protocol (no Explorer needed).
 fn open_settings() {
-    let (verb, uri): (Vec<u16>, Vec<u16>) = ("open\0".encode_utf16().collect(), "ms-settings:\0".encode_utf16().collect());
-    unsafe {
-        CoInitializeEx(std::ptr::null(), (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32); // ShellExecute may activate COM handlers
-        ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), uri.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL);
-    }
+    winrust_common::settings::open("ms-settings:");
 }
 
 /// What Win+<key> does here instead of in Explorer.

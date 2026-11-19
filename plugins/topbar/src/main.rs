@@ -1387,7 +1387,7 @@ unsafe fn bar_anim(hwnd: HWND) {
 }
 
 unsafe fn bar_step(hwnd: HWND) {
-    let target = if FULLSCREEN.load(Relaxed) || DESK_HIDE.load(Relaxed) { 0.0 } else { 1.0 };
+    let target = if FULLSCREEN.load(Relaxed) { 0.0 } else { 1.0 }; // hides only for a fullscreen game or video: not over the desktop, not in any style
     let now = now_ms();
     let dt = now.saturating_sub(BAR_T.replace(now)).min(50) as f32;
     let p = BAR_P.get();
@@ -1971,6 +1971,9 @@ unsafe fn open(path: &[u16]) {
     if p.to_lowercase().ends_with(".lnk") {
         bump(&p);
     }
+    if p.to_lowercase().starts_with("ms-settings:") {
+        return winrust_common::settings::open(&p); // needs Explorer as shell: it is started for the time Settings is open
+    }
     // Always through explorer.exe: it starts the target with the desktop user's normal token. ShellExecuteW from here would
     // inherit this bar's admin rights, and an elevated app cannot receive files dragged in from normal windows (UIPI), and
     // PrtSc / Win+Shift+S (ms-screenclip:) do not work when started elevated. With an argument and no explorer shell
@@ -2165,6 +2168,18 @@ unsafe fn on_drop(hwnd: HWND, hd: HDROP) {
         refresh_buttons();
     }
     InvalidateRect(hwnd, null(), 0);
+}
+
+/// The junk remover (purge, installed on request): lists what it would delete and asks for YES in its own elevated console.
+pub(crate) fn purge_installed() -> bool {
+    std::env::var_os("ProgramFiles").is_some_and(|pf| PathBuf::from(pf).join(r"purge\purge.exe").is_file())
+}
+
+unsafe fn open_purge() {
+    if let Some(pf) = std::env::var_os("ProgramFiles") {
+        let exe = PathBuf::from(pf).join(r"purge\purge.exe");
+        ShellExecuteW(null_mut(), wide("runas").as_ptr(), wide(&exe.to_string_lossy()).as_ptr(), wide("--ask").as_ptr(), null(), SW_SHOWNORMAL);
+    }
 }
 
 unsafe fn open_cleaner() {

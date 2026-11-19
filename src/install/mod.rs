@@ -3,17 +3,20 @@
 use crate::*;
 mod explorer;
 mod search;
+mod session;
 mod taskmgr;
 mod tools;
 mod topbar;
-pub(crate) use {explorer::*, search::*, taskmgr::*, tools::*, topbar::*};
+pub(crate) use {explorer::*, search::*, session::*, taskmgr::*, tools::*, topbar::*};
 
 pub(crate) fn out(prog: &str, args: &[&str]) -> Result<String, String> {
-    let o = Command::new(prog).args(args).creation_flags(0x0800_0000).output().map_err(|e| format!("{prog}: {e}"))?;
+    // reg.exe: HKCU means the signed-in user's, not the elevated account's (see session.rs)
+    let owned: Vec<String> = if prog == "reg" { i18n::reg::user_args(args) } else { args.iter().map(|a| a.to_string()).collect() };
+    let o = Command::new(prog).args(&owned).creation_flags(0x0800_0000).output().map_err(|e| format!("{prog}: {e}"))?;
     if o.status.success() {
         Ok(String::from_utf8_lossy(&o.stdout).into_owned())
     } else {
-        Err(format!("{prog} {}: {}{}", args.join(" "), String::from_utf8_lossy(&o.stdout).trim(), String::from_utf8_lossy(&o.stderr).trim()))
+        Err(format!("{prog} {}: {}{}", owned.join(" "), String::from_utf8_lossy(&o.stdout).trim(), String::from_utf8_lossy(&o.stderr).trim()))
     }
 }
 
@@ -120,6 +123,7 @@ pub(crate) fn checkpoint() -> Result<(), String> {
 pub(crate) fn install_plugin(i: usize) -> Result<String, String> {
     let p = &PLUGINS[i];
     let (inst, uninst) = p.actions.ok_or(t!("установка недоступна", "installation is not available"))?;
+    init().inspect_err(|e| log(&tf!("{}: ОШИБКА {e}", "{}: ERROR {e}", p.name)))?; // before anything is written: no user, no install
     let was = (p.installed)(); // already installed = an update: a failure must not remove the working copy
     WARN.lock().unwrap().clear();
     soft(t!("точка восстановления не создана", "restore point was not created"), checkpoint());
@@ -141,6 +145,7 @@ pub(crate) fn uninstall_plugin(i: usize) -> Result<String, String> {
     let p = &PLUGINS[i];
     let (_, uninst) = p.actions.ok_or(t!("удаление недоступно", "uninstall is not available"))?;
     WARN.lock().unwrap().clear();
+    init_soft();
     uninst().inspect_err(|e| log(&tf!("{}: ОШИБКА удаления {e}", "{}: uninstall ERROR {e}", p.name)))?;
     let w = WARN.lock().unwrap().clone();
     log(&format!("{}: {} {}", p.name, t!("удалён", "removed"), w.join(" | ")));
@@ -149,6 +154,7 @@ pub(crate) fn uninstall_plugin(i: usize) -> Result<String, String> {
 }
 
 pub(crate) fn rollback() -> Result<String, String> {
+    init_soft();
     // reverse install order: rust-explorer (which switched Explorer off) goes before topbar, else the session is left with no panel and no shell
     let errs: Vec<String> = PLUGINS.iter().rev().filter(|p| (p.installed)()).filter_map(|p| p.actions.and_then(|a| a.1().err().map(|e| format!("{}: {e}", p.name)))).collect();
     if errs.is_empty() { Ok(t!("Все плагины удалены, система восстановлена.", "All plugins removed, system restored.").into()) } else { Err(errs.join("; ")) }

@@ -1,4 +1,4 @@
-//! wiztree, photoview, debloat: small stand-alone tools, one exe each in its own Program Files folder.
+//! wiztree, photoview, debloat, purge: small stand-alone tools, one exe each in its own Program Files folder.
 use crate::*;
 
 // ---------- wiztree, photoview, debloat: small stand-alone tools, one exe each in its own Program Files folder ----------
@@ -9,6 +9,10 @@ pub(crate) fn wz_dir() -> PathBuf {
 
 pub(crate) fn pv_dir() -> PathBuf {
     program_files().join("photoview")
+}
+
+pub(crate) fn pu_dir() -> PathBuf {
+    program_files().join("purge")
 }
 
 pub(crate) fn db_dir() -> PathBuf {
@@ -96,5 +100,17 @@ pub(crate) fn db_uninstall() -> Result<(), String> {
         out(&exe.display().to_string(), &["--undo"])?; // on failure the exe and the undo file stay, so it can be repeated
     }
     tool_remove("debloat.exe", &db_dir(), None);
+    Ok(())
+}
+
+/// Installing = removing: purge.exe --apply deletes the bundled apps and telemetry tasks FOR GOOD. Uninstalling only deletes
+/// purge.exe itself; there is nothing to put back. OneDrive and Edge are not part of it (`purge.exe --apply --onedrive --edge`).
+pub(crate) fn pu_install() -> Result<(), String> {
+    tool_install("purge.exe", &pu_dir(), None)?;
+    out(&pu_dir().join("purge.exe").display().to_string(), &["--apply"]).map(|_| ())
+}
+
+pub(crate) fn pu_uninstall() -> Result<(), String> {
+    tool_remove("purge.exe", &pu_dir(), None);
     Ok(())
 }

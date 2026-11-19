@@ -23,6 +23,11 @@ pub(crate) fn taskbar_search(mode: u32) -> Result<(), String> {
     run("reg", &["add", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Search", "/v", "SearchboxTaskbarMode", "/t", "REG_DWORD", "/d", &mode.to_string(), "/f"])
 }
 
+/// Stripped Windows builds (LTSC ISOs run through a debloater) have no WSearch service: nothing to switch off, not an error.
+pub(crate) fn has_wsearch() -> bool {
+    run("sc.exe", &["query", "WSearch"]).is_ok()
+}
+
 pub(crate) fn install() -> Result<(), String> {
     // originals first: if anything below fails, the rollback restores exactly these
     save_dword("WSearchStart", reg_dword(WS_KEY, "Start"));
@@ -37,8 +42,12 @@ pub(crate) fn install() -> Result<(), String> {
         // via explorer: it starts the launcher with the desktop user's normal token. Started from here it would
         // inherit admin rights, and every file opened from search would run elevated too.
         let _ = Command::new("explorer.exe").arg(&dst).spawn();
-        run("sc.exe", &["config", "WSearch", "start=", "disabled"])?;
-        let _ = run("sc.exe", &["stop", "WSearch"]);
+        if has_wsearch() {
+            run("sc.exe", &["config", "WSearch", "start=", "disabled"])?;
+            let _ = run("sc.exe", &["stop", "WSearch"]);
+        } else {
+            WARN.lock().unwrap().push(t!("службы Windows Search (WSearch) нет в этой системе: шаг пропущен", "the Windows Search service (WSearch) does not exist on this system: step skipped").into());
+        }
         // SearchHost.exe (the Start/Win+S search UI) is not a service, so it gets the same IFEO trick as taskmgr: Windows runs `cmd /c exit` instead.
         run("reg", &["add", SH_KEY, "/v", "Debugger", "/t", "REG_SZ", "/d", "cmd.exe /c exit", "/f"])?;
         let _ = run("taskkill", &["/f", "/im", "SearchHost.exe"]);
@@ -58,8 +67,8 @@ pub(crate) fn uninstall() -> Result<(), String> {
         (Some(4), _) => "disabled",
         _ => "delayed-auto",
     };
-    let svc = run("sc.exe", &["config", "WSearch", "start=", mode]);
-    if svc.is_ok() && mode.ends_with("auto") {
+    let svc = if has_wsearch() { run("sc.exe", &["config", "WSearch", "start=", mode]) } else { Ok(()) }; // nothing to restore without the service
+    if svc.is_ok() && mode.ends_with("auto") && has_wsearch() {
         let _ = run("sc.exe", &["start", "WSearch"]);
     }
     let r = svc.and(taskbar_search(reg_dword(STATE, "SearchboxMode").unwrap_or(2)));

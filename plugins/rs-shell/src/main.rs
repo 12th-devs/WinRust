@@ -147,7 +147,7 @@ fn run_shell() {
     set_wallpaper();
     // no bar yet (its logon task is gone in user mode): start it and its hotkey helper from our folder, with our normal rights
     if !bar_up() { log(&format!("topbar spawn -> {:?}", quiet(find_exe("topbar.exe")).spawn().map(|_| ()))); }
-    let hotkeys = dir().join("reshell.exe");
+    let hotkeys = find_exe("reshell.exe"); // lives in topbar's folder, not ours
     if hotkeys.exists() { log(&format!("reshell spawn -> {:?}", quiet(&hotkeys).spawn().map(|_| ()))); }
     let desktop = dir().join("rust-explorer.exe");
     // the rust-explorer desktop: class "Progman" (so Wallpaper Engine finds it), title "rs-desktop" (explorer's is "Program Manager")
@@ -241,6 +241,10 @@ fn overlay() {
     log(&format!("overlay start (replace explorer: {replace})"));
     let wp = thread::spawn(set_wallpaper); // makes sure the BMP the desktop window paints exists (and refreshes the wallpaper)
     if !bar_up() { log(&format!("topbar spawn -> {:?}", quiet(find_exe("topbar.exe")).spawn().map(|_| ()))); }
+    // Win+I / Win+E / Win+D live in reshell: its Run entry may be missing (another account's HKCU), and without it Explorer's own Win+I
+    // fails once the shell is gone. A second copy exits at once (one hook per session).
+    let hk = find_exe("reshell.exe");
+    if hk.exists() { log(&format!("reshell spawn -> {:?}", quiet(&hk).spawn().map(|_| ()))); }
     let _ = wp.join(); // the BMP conversion (only on a fresh install or a new wallpaper) finishes before the desktop paints it
     let desktop = dir().join("rust-explorer.exe");
     let up = || unsafe { !FindWindowW(wide("Progman").as_ptr(), wide("rs-desktop").as_ptr()).is_null() };

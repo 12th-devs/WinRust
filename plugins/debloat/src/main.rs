@@ -50,7 +50,9 @@ const REGS: &[(&str, &str, u32, &str)] = &[
 ];
 
 fn run(prog: &str, args: &[&str]) -> (bool, String) {
-    match Command::new(prog).args(args).output() {
+    // HKCU = the signed-in user's when the installer was elevated as another administrator (WINRUST_SID)
+    let args: Vec<String> = if prog == "reg" { winrust_common::reg::user_args(args) } else { args.iter().map(|a| a.to_string()).collect() };
+    match Command::new(prog).args(&args).output() {
         Ok(o) => (o.status.success(), String::from_utf8_lossy(&o.stdout).into_owned()),
         Err(e) => (false, e.to_string()),
     }

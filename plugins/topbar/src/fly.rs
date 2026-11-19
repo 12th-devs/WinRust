@@ -283,6 +283,42 @@ pub fn start_toggle(path: &str) {
     let _ = std::fs::write(pin_file(), p.join("\n"));
 }
 
+static EXE_GEN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Programs that have no Start menu shortcut (a loose loliland.exe): asks rust-search for .exe files matching what is typed
+/// and adds them to the app list, where the normal ranking picks them up. Debounced; the panel repaints when they arrive.
+fn find_loose_exes(hw: HWND) {
+    let q = QUERY.with_borrow(|q| q.trim().to_string());
+    let gen_ = EXE_GEN.fetch_add(1, Relaxed) + 1;
+    let rs = PathBuf::from(std::env::var_os("ProgramFiles").unwrap_or_default()).join(r"rs-search\rs.exe");
+    if q.chars().count() < 2 || !rs.is_file() {
+        return;
+    }
+    let hw = hw as isize;
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        if EXE_GEN.load(Relaxed) != gen_ {
+            return; // typed on: a newer search is coming
+        }
+        let Ok(o) = Command::new(&rs).arg(&q).creation_flags(NO_WINDOW).output() else { return };
+        let mut apps = APPS.lock().unwrap();
+        let mut added = false;
+        for line in String::from_utf8_lossy(&o.stdout).lines().filter(|l| l.to_lowercase().ends_with(".exe")).take(12) {
+            let w = wide(line);
+            if apps.iter().any(|a| a.1 == w) {
+                continue;
+            }
+            let name = std::path::Path::new(line).file_stem().unwrap_or_default().to_string_lossy().to_string();
+            apps.push((name, w));
+            added = true;
+        }
+        drop(apps);
+        if added {
+            unsafe { InvalidateRect(hw as HWND, null(), 0) };
+        }
+    });
+}
+
 fn filtered() -> Vec<usize> {
     let q = QUERY.with_borrow(|q| q.to_lowercase());
     let mut apps = APPS.lock().unwrap();
@@ -610,7 +646,8 @@ fn menu_rows() -> (Vec<(i32, i32)>, i32) {
 
 /// Right-click menu of an empty spot of the bar.
 pub fn context_menu(x: i32) {
-    let items = vec![
+    let pu = crate::purge_installed();
+    let mut items = vec![
         MItem::new(t!("Параметры Windows", "Windows Settings")).hint("Win+I"),
         MItem::new(t!("Персонализация", "Personalization")),
         MItem::new(t!("Диспетчер задач", "Task Manager")).hint("Ctrl+Shift+Esc").sep(),
@@ -618,13 +655,18 @@ pub fn context_menu(x: i32) {
         MItem::new(t!("Программы WinRust на English", "WinRust apps in Русский")), // shared with the other WinRust programs
         MItem::new(t!("Закрыть панель", "Close the bar")).danger().sep(),
     ];
-    menu(x, None, items, |i| unsafe {
+    if pu {
+        items.insert(4, MItem::new(t!("Удалить мусор Windows (необратимо)", "Remove Windows junk (irreversible)")).danger());
+    }
+    menu(x, None, items, move |i| unsafe {
+        let i = if pu && i > 4 { i - 1 } else if pu && i == 4 { 99 } else { i };
         match i {
             0 => open(&wide("ms-settings:")),
             1 => open(&wide("ms-settings:personalization")),
             // with rtaskmgr-win32 installed this is our task manager; a full path because explorer.exe does not search PATH
             2 => open(&wide(&format!(r"{}\System32\taskmgr.exe", std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into())))),
             3 => open_cleaner(),
+            99 => crate::open_purge(),
             4 => crate::i18n::set_english(!crate::i18n::english()),
             _ => _ = PostMessageW(FindWindowW(wide("topbar").as_ptr(), null()), WM_CLOSE, 0, 0), // quits the bar, brings the Windows taskbar back
         }
@@ -1466,6 +1508,7 @@ unsafe extern "system" fn proc(hw: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LR
                     });
                     SCROLL.set(0);
                     SEL.set(0);
+                    find_loose_exes(hw);
                 }
             }
             InvalidateRect(hw, null(), 0);
