@@ -1220,7 +1220,10 @@ fn refresh() {
         let ok = GetSystemPowerStatus(&mut p) != 0 && p.BatteryFlag & 128 == 0 && p.BatteryLifePercent <= 100;
         BAT.set(if ok { (p.BatteryLifePercent as i32, p.ACLineStatus == 1) } else { (-1, false) });
         read_volume();
-        EXPLORER_UP.store(!find_other("Shell_TrayWnd").is_null(), Relaxed);
+        let up = !find_other("Shell_TrayWnd").is_null();
+        if EXPLORER_UP.swap(up, Relaxed) && !up {
+            place(BAR.load(Relaxed) as HWND); // Explorer (started for Settings) is gone and took the reserved strip with it
+        }
         if TAPPS.with_borrow(|t| t.is_empty()) && n % 8 == 4 {
             announce(); // no icons yet (apps started before us, or explorer restarted): ask them to register again
         }
