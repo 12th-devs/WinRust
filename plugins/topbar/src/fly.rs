@@ -367,17 +367,51 @@ fn filtered() -> Vec<usize> {
     v.into_iter().map(|x| x.2).collect()
 }
 
+/// The built-in panel through the video driver (`\\.\LCD`, what Windows' own slider talks to): needs no admin rights and no
+/// PowerShell. IOCTL_VIDEO_QUERY_DISPLAY_BRIGHTNESS 0x230498 answers (policy, AC %, DC %); IOCTL_VIDEO_SET_DISPLAY_BRIGHTNESS
+/// 0x23049C takes the same three bytes (policy 3: both). No panel (a desktop PC) = the open fails.
+fn lcd_io(code: u32, input: Option<[u8; 3]>) -> Option<[u8; 3]> {
+    use windows_sys::Win32::{
+        Storage::FileSystem::{CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING},
+        System::IO::DeviceIoControl,
+    };
+    unsafe {
+        let h = CreateFileW(wide(r"\\.\LCD").as_ptr(), 0xC000_0000, FILE_SHARE_READ | FILE_SHARE_WRITE, null(), OPEN_EXISTING, 0, null_mut());
+        if h == INVALID_HANDLE_VALUE {
+            return None;
+        }
+        let (mut out, mut n) = ([0u8; 3], 0u32);
+        let ok = match input {
+            Some(i) => DeviceIoControl(h, code, i.as_ptr().cast(), 3, null_mut(), 0, &mut n, null_mut()),
+            None => DeviceIoControl(h, code, null(), 0, out.as_mut_ptr().cast(), 3, &mut n, null_mut()),
+        } != 0;
+        CloseHandle(h);
+        ok.then_some(out)
+    }
+}
+
 fn read_brightness() {
     std::thread::spawn(|| {
-        let o = Command::new("powershell").args(["-NoProfile", "-Command", "(Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightness -ErrorAction SilentlyContinue).CurrentBrightness"]).creation_flags(NO_WINDOW).output();
-        BRIGHT.store(o.ok().and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse().ok()).unwrap_or(-1), Relaxed);
+        let ac = unsafe {
+            let mut s: windows_sys::Win32::System::Power::SYSTEM_POWER_STATUS = zeroed();
+            windows_sys::Win32::System::Power::GetSystemPowerStatus(&mut s) != 0 && s.ACLineStatus == 1
+        };
+        let v = lcd_io(0x23_0498, None).map(|b| if ac { b[1] } else { b[2] } as i32).filter(|v| *v <= 100).or_else(|| {
+            // no answer from the driver: WMI (some panels only show up there)
+            let o = Command::new("powershell").args(["-NoProfile", "-Command", "(Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightness -ErrorAction SilentlyContinue).CurrentBrightness"]).creation_flags(NO_WINDOW).output();
+            o.ok().and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse().ok())
+        });
+        BRIGHT.store(v.unwrap_or(-1), Relaxed);
     });
 }
 
 fn set_brightness(v: i32) {
     std::thread::spawn(move || {
-        let c = format!("Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightnessMethods | Invoke-CimMethod -MethodName WmiSetBrightness -Arguments @{{Timeout=1;Brightness={v}}}");
-        let _ = Command::new("powershell").args(["-NoProfile", "-Command", &c]).creation_flags(NO_WINDOW).output();
+        let b = v.clamp(0, 100) as u8;
+        if lcd_io(0x23_049C, Some([3, b, b])).is_none() {
+            let c = format!("Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightnessMethods | Invoke-CimMethod -MethodName WmiSetBrightness -Arguments @{{Timeout=1;Brightness={v}}}");
+            let _ = Command::new("powershell").args(["-NoProfile", "-Command", &c]).creation_flags(NO_WINDOW).output();
+        }
     });
 }
 
@@ -914,6 +948,11 @@ unsafe fn slide(a: Act, x: i32, rect: RECT) {
 
 /// Wi-Fi radio on/off (the Wi-Fi tile), software radio of every adapter (first PHY of each).
 unsafe fn wifi_radio(on: bool) {
+    crate::quick::set_wifi(on, move || unsafe { wifi_radio_wlan(on) });
+}
+
+/// The adapter's own software radio switch (the fallback): it cannot undo what Windows' radio manager switched off.
+unsafe fn wifi_radio_wlan(on: bool) {
     for_each_wlan(|h, g| {
         let s = WLAN_PHY_RADIO_STATE { dwPhyIndex: 0, dot11SoftwareRadioState: if on { dot11_radio_state_on } else { dot11_radio_state_off }, dot11HardwareRadioState: dot11_radio_state_on };
         WlanSetInterface(h, g, wlan_intf_opcode_radio_state, size_of::<WLAN_PHY_RADIO_STATE>() as u32, &s as *const _ as *const _, null());
@@ -980,7 +1019,13 @@ unsafe fn run_act(a: Act, rect: RECT, x: i32) {
             }
             1 => match crate::quick::bluetooth() {
                 Some(on) => crate::quick::set(false, !on),
-                None => NOTE.set(t!("Нет адаптера Bluetooth", "No Bluetooth adapter").into()),
+                None => {
+                    // no answer from the radio list (still reading, or Windows hides it from us): do not sit silent, show Windows' page
+                    crate::quick::refresh();
+                    NOTE.set(t!("Нет данных о Bluetooth, открываю параметры", "No Bluetooth state, opening Settings").into());
+                    open(&wide("ms-settings:bluetooth"));
+                    close();
+                }
             },
             2 => crate::quick::set(true, !crate::quick::airplane().unwrap_or(false)),
             3 => {
