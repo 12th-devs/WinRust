@@ -39,36 +39,36 @@ pub fn theme(dark: bool) -> Theme {
     if dark {
         Theme {
             dark,
-            bg: Rgb(28, 28, 28),
-            nav: Rgb(32, 32, 32),
-            panel: Rgb(44, 44, 44),
-            text: Rgb(255, 255, 255),
-            dim: Rgb(157, 157, 157),
-            border: Rgb(45, 45, 45),
-            sel: Rgb(47, 47, 47),
-            hover: Rgb(38, 38, 38),
-            accent: Rgb(96, 205, 255),
-            heat0: Rgb(14, 42, 71),
-            heat1: Rgb(27, 100, 173),
-            warn: Rgb(252, 225, 0),
-            bad: Rgb(255, 99, 97),
+            bg: Rgb(22, 22, 24),
+            nav: Rgb(28, 28, 31),
+            panel: Rgb(36, 36, 40),
+            text: Rgb(245, 245, 247),
+            dim: Rgb(142, 142, 147),
+            border: Rgb(46, 46, 50),
+            sel: Rgb(44, 44, 49),
+            hover: Rgb(33, 33, 37),
+            accent: Rgb(10, 132, 255),
+            heat0: Rgb(16, 34, 60),
+            heat1: Rgb(20, 98, 196),
+            warn: Rgb(255, 214, 10),
+            bad: Rgb(255, 69, 58),
         }
     } else {
         Theme {
             dark,
-            bg: Rgb(249, 249, 249),
-            nav: Rgb(243, 243, 243),
+            bg: Rgb(251, 251, 253),
+            nav: Rgb(242, 242, 247),
             panel: Rgb(255, 255, 255),
-            text: Rgb(26, 26, 26),
-            dim: Rgb(96, 96, 96),
-            border: Rgb(225, 225, 225),
-            sel: Rgb(232, 232, 232),
-            hover: Rgb(238, 238, 238),
-            accent: Rgb(0, 95, 184),
-            heat0: Rgb(228, 240, 252),
-            heat1: Rgb(104, 174, 235),
-            warn: Rgb(157, 93, 0),
-            bad: Rgb(196, 43, 28),
+            text: Rgb(29, 29, 31),
+            dim: Rgb(110, 110, 115),
+            border: Rgb(229, 229, 234),
+            sel: Rgb(229, 229, 234),
+            hover: Rgb(238, 238, 242),
+            accent: Rgb(0, 113, 227),
+            heat0: Rgb(232, 241, 253),
+            heat1: Rgb(102, 166, 240),
+            warn: Rgb(178, 110, 0),
+            bad: Rgb(215, 0, 21),
         }
     }
 }
@@ -126,7 +126,7 @@ fn mk(face: &str, px: i32, weight: i32) -> HFONT {
 /// Есть ли в системе шрифт значков Windows 11.
 fn icon_face() -> &'static str {
     // Segoe Fluent Icons есть в Windows 11; в Windows 10 — Segoe MDL2 Assets (те же коды символов)
-    "Segoe Fluent Icons"
+    winrust_common::style::icon_face()
 }
 
 impl Fonts {
@@ -134,12 +134,12 @@ impl Fonts {
         let p = |x: f64| (x * s).round() as i32;
         Fonts {
             f: [
-                mk("Segoe UI", p(13.0), 400),
-                mk("Segoe UI", p(12.0), 400),
-                mk("Segoe UI Semibold", p(13.0), 600),
-                mk("Segoe UI Semibold", p(22.0), 600),
-                mk("Segoe UI", p(20.0), 400),
-                mk("Segoe UI", p(30.0), 300),
+                mk(winrust_common::style::sans_face(), p(13.0), 400),
+                mk(winrust_common::style::sans_face(), p(12.0), 400),
+                mk(winrust_common::style::sans_face(), p(13.0), 600),
+                mk(winrust_common::style::sans_face(), p(22.0), 600),
+                mk(winrust_common::style::sans_face(), p(20.0), 400),
+                mk(winrust_common::style::sans_face(), p(30.0), 300),
                 mk(icon_face(), p(16.0), 400),
                 mk(icon_face(), p(13.0), 400),
             ],

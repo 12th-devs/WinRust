@@ -18,8 +18,10 @@ use std::{
 #[macro_use]
 extern crate winrust_common;
 use winrust_common as i18n;
-use winrust_common::style::{Style, pal, style, ui_face};
+use winrust_common::style::{Style, card, on_accent, pal, rgb, style, ui_face};
+mod clip;
 mod fly;
+mod quick;
 use windows::{
     Win32::{
         Media::Audio::{Endpoints::IAudioEndpointVolume, IMMDeviceEnumerator, MMDeviceEnumerator, eConsole, eRender},
@@ -50,7 +52,6 @@ use windows_sys::Win32::{
     UI::{Input::KeyboardAndMouse::*, Shell::*, WindowsAndMessaging::*},
 };
 
-use winrust_common::style::rgb;
 /// A corner radius in logical px, 0 in the square styles.
 fn rr(v: i32) -> i32 {
     if style().square() { 0 } else { sc(v) }
@@ -81,9 +82,9 @@ unsafe fn bar_y() -> i32 {
 unsafe fn pop_y(h: i32) -> i32 {
     if at_top() { bar_h() + sc(8) } else { bar_top() - sc(8) - h }
 }
-const GOOD: u32 = rgb(108, 203, 95);
-const BAD: u32 = rgb(255, 99, 97);
-const WARN: u32 = rgb(255, 196, 0);
+const GOOD: u32 = winrust_common::style::GOOD;
+const BAD: u32 = winrust_common::style::BAD;
+const WARN: u32 = winrust_common::style::WARN;
 const CALLBACK: u32 = WM_APP + 1;
 const WM_MOUSELEAVE: u32 = 0x02A3; // not exported under the enabled features
 const NO_WINDOW: u32 = 0x0800_0000;
@@ -108,6 +109,7 @@ static FULLSCREEN: AtomicBool = AtomicBool::new(false);
 static DESK_HIDE: AtomicBool = AtomicBool::new(false); // the desktop in front and the pointer away from the bar for 2 s
 static WIN_ALONE: AtomicBool = AtomicBool::new(false);
 static BAR: AtomicIsize = AtomicIsize::new(0); // the bar window, for the hook thread
+const VOLKEY: u32 = WM_APP + 14; // posted by the keyboard hook: a volume key (wp 0 up, 1 down, 2 mute)
 const SNIP: u32 = WM_APP + 13; // posted by the keyboard hook: PrtSc / Win+Shift+S with no explorer to handle them
 static EXPLORER_UP: AtomicBool = AtomicBool::new(true); // explorer's taskbar exists (it handles PrtSc itself then); refreshed by the bar
 
@@ -721,6 +723,38 @@ unsafe fn hide_taskbar() {
     }
 }
 
+fn taskbar_state_file() -> PathBuf {
+    appdata_file("topbar-taskbar-state.txt")
+}
+
+/// The taskbar mode (always on top / auto-hide bits) the user had before the bar hid it. It lives in a file so that
+/// `--restore` (reshell's watchdog after a crash) puts back the user's own mode, not the Windows default.
+fn saved_taskbar_state() -> Option<usize> {
+    std::fs::read_to_string(taskbar_state_file()).ok()?.trim().parse().ok()
+}
+
+fn forget_taskbar_state() {
+    let _ = std::fs::remove_file(taskbar_state_file());
+}
+
+/// At start: the mode to give back later. A file left by a crashed run wins (explorer's current mode is then our own
+/// auto-hide); otherwise the current mode is the user's and is written down. Without explorer's taskbar: the default.
+unsafe fn remember_taskbar_state() -> usize {
+    if let Some(s) = saved_taskbar_state() {
+        return s;
+    }
+    let tb = tray()[0];
+    if tb.is_null() {
+        return ABS_ALWAYSONTOP as usize;
+    }
+    let mut ab: APPBARDATA = zeroed();
+    ab.cbSize = size_of::<APPBARDATA>() as u32;
+    ab.hWnd = tb;
+    let s = SHAppBarMessage(ABM_GETSTATE, &mut ab);
+    let _ = std::fs::write(taskbar_state_file(), s.to_string());
+    s
+}
+
 unsafe fn show_taskbar(state: usize) {
     set_state(tray()[0], state);
     for t in tray().into_iter().filter(|t| !t.is_null()) {
@@ -743,7 +777,7 @@ unsafe fn place(hwnd: HWND) {
     ab.hWnd = hwnd;
     // the reserved strip: the bar itself plus the dock's gap under it
     // the dock reserves nothing: maximized windows take the whole screen and the dock slides away over them
-    let strip = if style() == Style::Dock { 0 } else { bar_h() };
+    let strip = if style() == Style::Dock || i18n::style::autohide() { 0 } else { bar_h() };
     if at_top() {
         ab.uEdge = ABE_TOP;
         ab.rc = RECT { left: 0, top: 0, right: cx, bottom: strip };
@@ -1390,7 +1424,8 @@ unsafe fn bar_anim(hwnd: HWND) {
 }
 
 unsafe fn bar_step(hwnd: HWND) {
-    let target = if FULLSCREEN.load(Relaxed) { 0.0 } else { 1.0 }; // hides only for a fullscreen game or video: not over the desktop, not in any style
+    // hides for a fullscreen game or video, and with "auto-hide" on while the pointer is away (never otherwise: not over the desktop, not in any style)
+    let target = if FULLSCREEN.load(Relaxed) || (i18n::style::autohide() && DESK_HIDE.load(Relaxed)) { 0.0 } else { 1.0 };
     let now = now_ms();
     let dt = now.saturating_sub(BAR_T.replace(now)).min(50) as f32;
     let p = BAR_P.get();
@@ -1444,7 +1479,7 @@ unsafe fn fs_update(hwnd: HWND) {
     let now = now_ms();
     let sh = GetSystemMetrics(SM_CYSCREEN);
     let over = if at_top() { pt.y <= 0 || (pt.y < bar_h() && BAR_P.get() > 0.0) } else { pt.y >= sh - 1 || (pt.y >= sh - bar_h() - dock_gap() && BAR_P.get() > 0.0) };
-    if fs || !(desktop_now() || dock_covered()) || fly::any_open() || over {
+    if fs || !(i18n::style::autohide() || desktop_now() || dock_covered()) || fly::any_open() || over {
         DESK_T.set(now);
     }
     let desk = !fs && now.saturating_sub(DESK_T.get()) >= 2000;
@@ -1500,21 +1535,41 @@ unsafe fn force_fg(hw: HWND) {
 unsafe extern "system" fn kb_hook(n: i32, w: WPARAM, l: LPARAM) -> LRESULT {
     if n >= 0 {
         let k = &*(l as *const KBDLLHOOKSTRUCT);
-        if k.flags & LLKHF_INJECTED == 0 {
-            // without explorer nobody opens the screen capture: PrtSc (when Windows is set to snip with it; otherwise it
-            // copies the screen by itself) and Win+Shift+S do it here
-            if !EXPLORER_UP.load(Relaxed) {
-                let held = |vk: u16| GetAsyncKeyState(vk as i32) < 0;
-                let down = w == WM_KEYDOWN as usize || w == WM_SYSKEYDOWN as usize;
-                let snip_key = k.vkCode == VK_SNAPSHOT as u32;
-                let win_shift_s = k.vkCode == b'S' as u32 && down && (held(VK_LWIN) || held(VK_RWIN)) && held(VK_SHIFT);
-                if snip_key || win_shift_s {
-                    if down {
-                        WIN_ALONE.store(false, Relaxed);
-                        PostMessageW(BAR.load(Relaxed) as HWND, SNIP, snip_key as usize, 0); // wp 1: PrtSc, 0: Win+Shift+S
-                    }
-                    return 1;
+        let down0 = w == WM_KEYDOWN as usize || w == WM_SYSKEYDOWN as usize;
+        // without explorer nobody handles the volume keys, and Surface's power + volume-up arrives as an injected Win+PrtSc
+        // (the injected events are skipped below, so these two are taken before that check)
+        if !EXPLORER_UP.load(Relaxed) {
+            let vol = [(VK_VOLUME_UP, 0), (VK_VOLUME_DOWN, 1), (VK_VOLUME_MUTE, 2)].into_iter().find(|&(vk, _)| k.vkCode == vk as u32);
+            if let Some((_, v)) = vol {
+                if down0 {
+                    PostMessageW(BAR.load(Relaxed) as HWND, VOLKEY, v, 0);
                 }
+                return 1;
+            }
+            if k.vkCode == VK_SNAPSHOT as u32 && k.flags & LLKHF_INJECTED != 0 {
+                if down0 {
+                    PostMessageW(BAR.load(Relaxed) as HWND, SNIP, 1, 0);
+                }
+                return 1;
+            }
+        }
+        if k.flags & LLKHF_INJECTED == 0 {
+            // Win+Shift+S is our own region clipper (also under Explorer); without explorer nobody opens the screen
+            // capture either: PrtSc (when Windows is set to snip with it; otherwise it copies the screen by itself) does it here
+            let held = |vk: u16| GetAsyncKeyState(vk as i32) < 0;
+            let snip_key = !EXPLORER_UP.load(Relaxed) && k.vkCode == VK_SNAPSHOT as u32;
+            let win_shift_s = k.vkCode == b'S' as u32 && down0 && (held(VK_LWIN) || held(VK_RWIN)) && held(VK_SHIFT);
+            if snip_key || win_shift_s {
+                if down0 {
+                    WIN_ALONE.store(false, Relaxed);
+                    if win_shift_s {
+                        // a key between Win down and up, so Windows does not open its Start menu on the release
+                        keybd_event(0xE8, 0, 0, 0);
+                        keybd_event(0xE8, 0, KEYEVENTF_KEYUP, 0);
+                    }
+                    PostMessageW(BAR.load(Relaxed) as HWND, SNIP, snip_key as usize, 0); // wp 1: PrtSc, 0: Win+Shift+S
+                }
+                return 1;
             }
             let down = w == WM_KEYDOWN as usize || w == WM_SYSKEYDOWN as usize;
             let bar = BAR.load(Relaxed) as HWND;
@@ -1633,10 +1688,6 @@ unsafe fn app_window() -> HWND {
 /// The system's own capture overlay (ms-screenclip:) does not come up without explorer as the shell. Returns the file name.
 /// `topbar --shot` does the same from a command line.
 unsafe fn screenshot() -> Option<String> {
-    use windows_sys::Win32::{
-        Graphics::GdiPlus::{GdipCreateBitmapFromHBITMAP, GdipDisposeImage, GdipSaveImageToFile, GpBitmap, GpImage},
-        System::DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData},
-    };
     let (x, y, w, h) = (GetSystemMetrics(76), GetSystemMetrics(77), GetSystemMetrics(78), GetSystemMetrics(79)); // virtual screen
     if w <= 0 || h <= 0 {
         return None;
@@ -1648,6 +1699,16 @@ unsafe fn screenshot() -> Option<String> {
     SelectObject(mem, old);
     DeleteDC(mem);
     ReleaseDC(null_mut(), scr);
+    save_bitmap(bmp)
+}
+
+/// Saves a screen bitmap as Pictures\Screenshots\Screenshot <date time>.png and puts it on the clipboard (which then owns it).
+/// Returns the file name when either worked.
+unsafe fn save_bitmap(bmp: HBITMAP) -> Option<String> {
+    use windows_sys::Win32::{
+        Graphics::GdiPlus::{GdipCreateBitmapFromHBITMAP, GdipDisposeImage, GdipSaveImageToFile, GpBitmap, GpImage},
+        System::DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData},
+    };
     let mut t: SYSTEMTIME = zeroed();
     GetLocalTime(&mut t);
     let name = format!("Screenshot {:04}-{:02}-{:02} {:02}-{:02}-{:02}.png", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
@@ -1670,6 +1731,14 @@ unsafe fn screenshot() -> Option<String> {
         DeleteObject(bmp);
     }
     (saved || clip).then_some(name)
+}
+
+/// The clipper saved a region (its file name is left in `clip::DONE`): say so above the bar for a moment.
+unsafe fn clip_notice(bar: HWND) {
+    let name = clip::DONE.lock().ok().and_then(|mut d| d.take()).unwrap_or_default();
+    KillTimer(bar, 2);
+    show_tip(tf!("Фрагмент сохранён: {name}\nи скопирован в буфер обмена", "Snip saved: {name}\nand copied to the clipboard"), GetSystemMetrics(SM_CXSCREEN) / 2);
+    SetTimer(bar, 6, 2500, None);
 }
 
 /// PrtSc pressed: take the screenshot, then say so above the bar for a moment.
@@ -1786,13 +1855,14 @@ unsafe fn paint(hwnd: HWND) {
     for y in 0..h {
         fill(dc, RECT { left: 0, top: y, right: cr.right, bottom: y + 1 }, mix(lit, pal().bg, (y as f32 / sc(18) as f32).min(1.0)), 0);
     }
+    winrust_common::style::backdrop(dc, cr, sc(100) as f32 / 100.0);
     let edge = if at_top() { h - 1 } else { 0 }; // the hairline faces the windows
     fill(dc, RECT { left: 0, top: edge, right: cr.right, bottom: edge + 1 }, pal().line, 0);
     if !at_top() {
         fill(dc, RECT { left: 0, top: 1, right: cr.right, bottom: 2 }, mix(pal().bg, pal().text, 0.08), 0);
     }
     SetBkMode(dc, TRANSPARENT as i32);
-    let (face, gface) = (wide(ui_face()), wide("Segoe MDL2 Assets"));
+    let (face, gface) = (wide(ui_face()), wide(winrust_common::style::icon_face()));
     let font = |f: &[u16], px: i32, wt: i32| CreateFontW(-sc(px), 0, 0, 0, wt, 0, 0, 0, 1, 0, 0, 5, 0, f.as_ptr());
     let (f_txt, f_small, f_glyph, f_bold) = (font(&face, 13, 400), font(&face, 12, 400), font(&gface, 16, 400), font(&face, 13, 600));
     let of = SelectObject(dc, f_txt);
@@ -2218,16 +2288,23 @@ unsafe fn open_launcher() -> bool {
 /// The gear's menu: the UI style (saved for the other WinRust programs) and putting the windows side by side.
 unsafe fn style_menu() {
     let bar = BAR.load(Relaxed) as HWND;
-    let names = [t!("Обычный", "Normal"), t!("Терминал", "Terminal"), t!("Плавающий док", "Floating dock"), t!("Тайлинг", "Tiling")];
+    let names = [t!("Обычный", "Normal"), t!("Терминал", "Terminal"), t!("Плавающий док", "Floating dock"), t!("Тайлинг", "Tiling"), t!("Белая дорога", "White road")];
     let mut items: Vec<fly::MItem> = i18n::style::ALL.iter().zip(names).map(|(&s, n)| fly::MItem::new(n).on(s == style())).collect();
     items.push(fly::MItem::new(t!("Разложить окна плиткой", "Tile the windows")).sep());
+    items.push(fly::MItem::new(t!("Скрывать панель автоматически", "Hide the bar automatically")).on(i18n::style::autohide()));
     let head = (null_mut(), "\u{E713}", t!("Стиль", "Style").to_string(), t!("Вид панели и программ WinRust", "Look of the bar and the WinRust programs").to_string());
+    let tile = i18n::style::ALL.len();
     fly::menu(tip_cx(&bar_layout(bar), GEAR), Some(head), items, move |i| match i18n::style::ALL.get(i) {
         Some(&s) => {
             i18n::style::set_style(s);
             place(bar);
         }
-        None => tile_windows(),
+        None if i == tile => tile_windows(),
+        None => {
+            i18n::style::set_autohide(!i18n::style::autohide());
+            place(bar); // the reserved strip comes or goes with it
+            bar_anim(bar);
+        }
     });
 }
 
@@ -2413,7 +2490,15 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         ALT_TAB => alt_tab(wp == 1),
         ALT_UP => alt_done(wp == 1),
         SNIP if wp == 1 => screenshot_notice(hwnd),
-        SNIP => open(&wide("ms-screenclip:")),
+        SNIP if wp == 2 => clip_notice(hwnd),
+        SNIP => clip::start(),
+        VOLKEY => {
+            if wp == 2 { toggle_mute() } else { add_volume(if wp == 0 { 4 } else { -4 }) }
+            KillTimer(hwnd, 2);
+            show_tip(vol_tip(), tip_cx(&bar_layout(hwnd), VOL_I));
+            SetTimer(hwnd, 6, 1200, None);
+            InvalidateRect(hwnd, null(), 0);
+        }
         WM_DROPFILES => on_drop(hwnd, wp as HDROP),
         WM_TIMER => {
             hide_taskbar_if_shown();
@@ -2488,6 +2573,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 set_work_area(RECT { left: 0, top: 0, right: GetSystemMetrics(SM_CXSCREEN), bottom: GetSystemMetrics(SM_CYSCREEN) }); // ours: give the strip back
             }
             show_taskbar(OLD_STATE.get());
+            forget_taskbar_state();
             DestroyWindow(HOST.replace(null_mut()));
             announce(); // icons go back to explorer's tray
             PostQuitMessage(0);
@@ -2500,7 +2586,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
 fn main() {
     unsafe {
         if std::env::args().any(|a| a == "--restore") {
-            show_taskbar(ABS_ALWAYSONTOP as usize); // shortcut: the Windows default, not the user's previous taskbar mode
+            show_taskbar(saved_taskbar_state().unwrap_or(ABS_ALWAYSONTOP as usize));
+            forget_taskbar_state();
             if find_other("Shell_TrayWnd").is_null() {
                 set_work_area(RECT { left: 0, top: 0, right: GetSystemMetrics(SM_CXSCREEN), bottom: GetSystemMetrics(SM_CYSCREEN) }); // a killed bar's reserved strip
             }
@@ -2513,6 +2600,22 @@ fn main() {
             inp.GdiplusVersion = 1;
             GdiplusStartup(&mut tok, &inp, null_mut());
             screenshot();
+            return;
+        }
+        // `topbar --preview quick|wifi`: one flyout on its own (no bar, no hooks), to look at a style change; the process is closed by hand
+        if let Some(p) = std::env::args().skip_while(|a| a != "--preview").nth(1) {
+            SetProcessDPIAware();
+            let (mut tok, mut inp): (usize, GdiplusStartupInput) = (0, zeroed());
+            inp.GdiplusVersion = 1;
+            GdiplusStartup(&mut tok, &inp, null_mut());
+            fly::init(GetModuleHandleW(null()));
+            fly::PREVIEW.store(true, Relaxed);
+            fly::toggle(if p == "wifi" { fly::Kind::Wifi } else { fly::Kind::Quick });
+            let mut msg: MSG = zeroed();
+            while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
             return;
         }
         // Atomic single-instance guard (FindWindow alone raced when two launchers started us at once); the handle lives until exit.
@@ -2569,10 +2672,7 @@ fn main() {
         let swc = wide("topbar_alttab");
         RegisterClassW(&WNDCLASSW { lpfnWndProc: Some(sw_proc), hInstance: hi, lpszClassName: swc.as_ptr(), ..zeroed() });
         SWWND.set(CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE, swc.as_ptr(), null(), WS_POPUP, 0, 0, 1, 1, null_mut(), null_mut(), hi, null()));
-        let mut ab: APPBARDATA = zeroed();
-        ab.cbSize = size_of::<APPBARDATA>() as u32;
-        ab.hWnd = tray()[0];
-        OLD_STATE.set(SHAppBarMessage(ABM_GETSTATE, &mut ab));
+        OLD_STATE.set(remember_taskbar_state());
         appbar_new(hwnd);
         // Without explorer nobody is the "taskman" window, so Windows treats minimized windows as loose icons and leaves
         // them as caption stubs on the desktop. Becoming that window (what explorer's taskbar does) makes them hide properly

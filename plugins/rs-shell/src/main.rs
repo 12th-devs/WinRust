@@ -207,7 +207,7 @@ fn replace_on() -> bool {
 /// Ends the Explorer that runs as the shell (started without arguments). Folder windows (started with a path) and the COM
 /// host (`/factory ... -Embedding`) are other explorer.exe processes and keep running.
 fn kill_shell_explorer() {
-    let script = r#"Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" | Where-Object { $_.CommandLine -match '(?i)explorer\.exe"?\s*$' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"#;
+    let script = r#"Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" | Where-Object { $_.CommandLine -match '(?i)explorer\.exe"?(\s+/NoUACCheck)?\s*$' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"#;
     let r = quiet("powershell").args(["-NoProfile", "-NonInteractive", "-Command", script]).creation_flags(NO_WINDOW).status();
     log(&format!("explorer shell stopped -> {:?}", r.map(|s| s.success())));
 }

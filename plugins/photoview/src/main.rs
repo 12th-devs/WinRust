@@ -25,7 +25,7 @@ use windows_sys::Win32::{
 
 pub const EXTS: [&str; 11] = ["jpg", "jpeg", "jfif", "png", "bmp", "gif", "tif", "tiff", "webp", "heic", "avif"];
 const WM_IMG: u32 = WM_APP + 1; // lparam = Box<(u32, Result<Img, String>)>
-const BG: [u8; 3] = [18, 19, 22]; // BGR of rgb(22, 19, 18)
+const BG: [u8; 3] = [24, 22, 22]; // BGR of rgb(22, 22, 24), the shared graphite
 
 static GEN: AtomicU32 = AtomicU32::new(0); // newest load; older decodes that finish late are dropped
 
@@ -134,7 +134,7 @@ unsafe fn paint(hwnd: HWND) {
             } else {
                 SelectObject(mem, a.font as _);
                 SetBkMode(mem, TRANSPARENT as _);
-                SetTextColor(mem, 0x91_98_a6);
+                SetTextColor(mem, 0x93_8e_8e);
                 let mut r = rc;
                 let t = wide(if a.files.is_empty() { "Open a picture with this program, or drop one here" } else { &a.note });
                 DrawTextW(mem, t.as_ptr(), -1, &mut r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
@@ -175,7 +175,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
         match msg {
             WM_CREATE => {
                 let dpi = GetDpiForSystem() as i32;
-                let f = CreateFontW(-(18 * dpi / 96), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, wide("Segoe UI").as_ptr());
+                let f = CreateFontW(-(18 * dpi / 96), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, wide(winrust_common::style::sans_face()).as_ptr());
                 APP.with_borrow_mut(|a| (a.dpi, a.font) = (dpi, f as isize));
                 DragAcceptFiles(hwnd, 1);
                 0

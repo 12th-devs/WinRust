@@ -6,7 +6,7 @@ use winapi::um::{
     processthreadsapi::{GetPriorityClass, OpenProcess, SetPriorityClass},
     winbase::{
         ABOVE_NORMAL_PRIORITY_CLASS, BELOW_NORMAL_PRIORITY_CLASS, GetProcessAffinityMask, HIGH_PRIORITY_CLASS,
-        IDLE_PRIORITY_CLASS, NORMAL_PRIORITY_CLASS, SetProcessAffinityMask,
+        IDLE_PRIORITY_CLASS, NORMAL_PRIORITY_CLASS,
     },
     winnt::{HANDLE, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_INFORMATION, SERVICE_WIN32},
     winsvc::*,
@@ -136,7 +136,7 @@ pub fn set_affinity(pid: u32, half: bool) -> bool {
         }
         let cores = sm.count_ones();
         let mask = if half && cores > 1 { first_n_bits(sm, cores / 2) } else { sm };
-        SetProcessAffinityMask(h, mask as u32) != 0 // shortcut: winapi 0.3 принимает 32-битную маску, > 32 ядер не поддержано
+        SetProcessAffinityMask64(h, mask) != 0
     })
     .unwrap_or(false)
 }
@@ -154,6 +154,13 @@ fn first_n_bits(mask: usize, n: u32) -> usize {
         }
     }
     out
+}
+
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    // winapi 0.3 declares the mask as a 32-bit DWORD; the real parameter is a pointer-sized DWORD_PTR
+    #[link_name = "SetProcessAffinityMask"]
+    fn SetProcessAffinityMask64(h: HANDLE, mask: usize) -> i32;
 }
 
 #[link(name = "shell32")]
@@ -353,6 +360,7 @@ mod tests {
     fn first_bits() {
         assert_eq!(first_n_bits(0b1111_0000, 2), 0b0011_0000);
         assert_eq!(first_n_bits(0b1111, 4), 0b1111);
+        assert_eq!(first_n_bits(usize::MAX, 40), (1usize << 40) - 1); // ядра за пределами 32-го бита
     }
 }
 

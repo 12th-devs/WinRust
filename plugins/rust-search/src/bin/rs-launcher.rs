@@ -380,7 +380,7 @@ unsafe fn apply_style(main: HWND) {
         CreateFontW(-((px as f32 * scale).round() as i32), 0, 0, 0, weight, 0, 0, 0, DEFAULT_CHARSET as _, 0, 0, CLEARTYPE_QUALITY as _, 0, wide(face).as_ptr()) as isize
     };
     let face = ui_face();
-    let fonts = [font(22, 400, face), font(16, 600, face), font(13, 400, face), font(20, 400, "Segoe MDL2 Assets"), font(12, 400, face)];
+    let fonts = [font(22, 400, face), font(16, 600, face), font(13, 400, face), font(20, 400, winrust_common::style::icon_face()), font(12, 400, face)];
     for f in st(|s| std::mem::replace(&mut s.fonts, fonts)) {
         if f != 0 {
             DeleteObject(f as _);
@@ -388,7 +388,7 @@ unsafe fn apply_style(main: HWND) {
     }
     // Windows 11: rounded corners (square in the terminal and tiling styles), dark frame, border colour. Windows 10 rejects the corner attribute.
     let square = style().square();
-    let (round, dark, border) = (if square { 1i32 } else { 2i32 }, 1i32, rgb(c_border()) as i32);
+    let (round, dark, border) = (if square { 1i32 } else { 2i32 }, !style().light() as i32, rgb(c_border()) as i32);
     let hr = DwmSetWindowAttribute(main, 33, &round as *const _ as _, 4);
     DwmSetWindowAttribute(main, 20, &dark as *const _ as _, 4);
     DwmSetWindowAttribute(main, 34, &border as *const _ as _, 4);

@@ -29,6 +29,7 @@ members = [
     "plugins/photoview",
     "plugins/debloat",
     "plugins/purge",
+    "plugins/rust-settings",
 ]
 # Stay separate projects with their own target\ and Cargo.lock, because they need panic = "unwind" (the profile below is
 # shared by every member): rust-search's service threads must not take the process down, chrome-rs catches panics per page.

@@ -6,11 +6,11 @@ use super::*;
 use std::{cell::Cell, collections::HashMap, path::Path};
 use windows_sys::Win32::{Graphics::{Dwm::DwmSetWindowAttribute, Gdi::*}, System::{LibraryLoader::{GetProcAddress, LoadLibraryW}, SystemInformation::GetTickCount64}, UI::Input::KeyboardAndMouse::{GetFocus, TRACKMOUSEEVENT, TME_LEAVE, TrackMouseEvent}};
 
-pub const fn rgb(r: u8, g: u8, b: u8) -> u32 { r as u32 | (g as u32) << 8 | (b as u32) << 16 }
 // The colours come from the WinRust style the topbar gear picks (normal, terminal, dock, tiling): the same palette as the bar.
 pub use winrust_common::style::{pal, ui_face};
-pub fn listbg() -> u32 { mix(pal().bg, 0, 0.22) }
-pub fn pill() -> u32 { mix(pal().bg, 0, 0.35) }
+// sunk surfaces: darker than the window on the dark styles, white on the light one
+pub fn listbg() -> u32 { if winrust_common::style::style().light() { winrust_common::style::card() } else { mix(pal().bg, 0, 0.22) } }
+pub fn pill() -> u32 { if winrust_common::style::style().light() { mix(pal().bg, pal().text, 0.06) } else { mix(pal().bg, 0, 0.35) } }
 pub fn off() -> u32 { mix(pal().dim, pal().bg, 0.45) }
 
 pub const CHROME_H: i32 = 88;
@@ -122,7 +122,7 @@ pub fn font(px: i32, weight: i32, face: &str) -> isize {
 pub fn dark_title(h: HWND) {
     unsafe {
         let set = |attr: u32, v: i32| { DwmSetWindowAttribute(h, attr, &v as *const _ as _, 4); };
-        set(20, 1); // immersive dark mode
+        set(20, !winrust_common::style::style().light() as i32); // immersive dark mode, except on the light style
         set(33, if winrust_common::style::style().square() { 1 } else { 2 }); // round corners, square in the terminal and tiling styles
         set(35, pal().bg as i32); // caption
         set(36, pal().text as i32); // caption text
@@ -221,7 +221,7 @@ pub unsafe fn list_draw(lp: LPARAM) -> LRESULT {
         CDDS_POSTPAINT => {
             if SendMessageW(list, LVM_GETITEMCOUNT, 0, 0) == 0 {
                 // an empty folder says so instead of showing a blank list
-                let (f_big, f_txt) = (font(40, 400, "Segoe MDL2 Assets") as HFONT, font(14, 400, ui_face()) as HFONT);
+                let (f_big, f_txt) = (font(40, 400, winrust_common::style::icon_face()) as HFONT, font(14, 400, ui_face()) as HFONT);
                 SetBkMode(dc, TRANSPARENT as i32);
                 let mid = cr.bottom / 3;
                 let of = SelectObject(dc, f_big);
@@ -496,7 +496,7 @@ unsafe fn paint_chrome(hwnd: HWND) {
     SetBkMode(dc, TRANSPARENT as i32);
     let l = layout(cr.right, labels.len());
     let hot = HOT.get();
-    let (f_txt, f_glyph, f_small) = (font(13, 400, ui_face()) as HFONT, font(16, 400, "Segoe MDL2 Assets") as HFONT, font(12, 400, "Segoe MDL2 Assets") as HFONT);
+    let (f_txt, f_glyph, f_small) = (font(13, 400, ui_face()) as HFONT, font(16, 400, winrust_common::style::icon_face()) as HFONT, font(12, 400, winrust_common::style::icon_face()) as HFONT);
     let of = SelectObject(dc, f_txt);
 
     // tabs
@@ -741,7 +741,13 @@ pub fn nav_init(h: HWND) {
             let letter = (b'A' + i as u8) as char;
             let root = format!("{letter}:\\");
             // fixed and removable disks only: asking a dead network share for its label would stall the window
-            if !matches!(GetDriveTypeW(w(&root).as_ptr()), 2 | 3) { continue; }
+            let ty = GetDriveTypeW(w(&root).as_ptr());
+            if ty == 4 {
+                // a mapped network drive: listed without label and size, they would stall the window while a share is down
+                v.push(NavItem { title: format!("Network Drive ({letter}:)"), path: PathBuf::from(root), glyph: "\u{E8CE}", cap: None });
+                continue;
+            }
+            if !matches!(ty, 2 | 3) { continue; }
             let mut label = [0u16; 64];
             let ok = GetVolumeInformationW(w(&root).as_ptr(), label.as_mut_ptr(), 64, ptr::null_mut(), ptr::null_mut(), ptr::null_mut(), ptr::null_mut(), 0);
             let name = if ok != 0 { wstr(label.as_ptr()) } else { String::new() };
@@ -800,7 +806,7 @@ unsafe fn paint_nav(hwnd: HWND) {
     FillRect(dc, &cr, bg);
     DeleteObject(bg);
     SetBkMode(dc, TRANSPARENT as i32);
-    let (f_txt, f_head, f_glyph, f_small) = (font(13, 400, ui_face()) as HFONT, font(12, 600, ui_face()) as HFONT, font(16, 400, "Segoe MDL2 Assets") as HFONT, font(11, 400, ui_face()) as HFONT);
+    let (f_txt, f_head, f_glyph, f_small) = (font(13, 400, ui_face()) as HFONT, font(12, 600, ui_face()) as HFONT, font(16, 400, winrust_common::style::icon_face()) as HFONT, font(11, 400, ui_face()) as HFONT);
     let of = SelectObject(dc, f_txt);
     // where we are = the deepest item that contains the current folder
     let cur = ST.with(|c| c.try_borrow().ok().map(|s| s.dir.to_string_lossy().to_lowercase())).unwrap_or_default();
@@ -832,7 +838,7 @@ unsafe fn paint_nav(hwnd: HWND) {
                 let bar = rc(r.left + sc(48), y + sc(30), r.right - sc(14), y + sc(34));
                 fill(dc, bar, mix(pal().bg, pal().text, 0.12), sc(4));
                 let fw = ((bar.right - bar.left) as f32 * used) as i32;
-                fill(dc, rc(bar.left, bar.top, bar.left + fw.max(sc(4)), bar.bottom), if used > 0.9 { rgb(255, 99, 97) } else { pal().accent }, sc(4));
+                fill(dc, rc(bar.left, bar.top, bar.left + fw.max(sc(4)), bar.bottom), if used > 0.9 { winrust_common::style::BAD } else { pal().accent }, sc(4));
                 SelectObject(dc, f_small);
                 let gb = |b: u64| b as f64 / 1_073_741_824.0;
                 text(dc, &format!("{:.0} GB free of {:.0} GB", gb(free), gb(total)), rc(bar.left, bar.bottom + sc(1), r.right - sc(8), y + hgt - sc(2)), pal().dim, DT_LEFT);

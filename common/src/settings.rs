@@ -42,14 +42,63 @@ if($started){
   $bad=0
   while($bad -lt 5 -and (Get-Process SystemSettings -ErrorAction SilentlyContinue)){ Start-Sleep -Seconds 2; if(Get-Process SystemSettings -ErrorAction SilentlyContinue | Where-Object { -not $_.Responding }){ $bad++ } else { $bad=0 } }
   KillStale
-  Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" | Where-Object { $_.CommandLine -match '(?i)explorer\.exe"?\s*$' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+  Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" | Where-Object { $_.CommandLine -match '(?i)explorer\.exe"?(\s+/NoUACCheck)?\s*$' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
   $rx="$env:ProgramFiles\rust-explorer\rust-explorer.exe"
   if((Test-Path $rx) -and -not (Get-CimInstance Win32_Process -Filter "Name='rust-explorer.exe'" | Where-Object { $_.CommandLine -match '--desktop' })){ Start-Process $rx -ArgumentList '--desktop' }
 }
 "#;
 
+/// The rust-settings page that stands for an exact `ms-settings:` address (a bare `ms-settings:` is Win+I: the first page).
+/// Only these: any other address keeps going to Windows' own Settings.
+fn own_page(uri: &str) -> Option<&'static str> {
+    match uri.trim().to_ascii_lowercase().as_str() {
+        "ms-settings:" | "ms-settings:display" | "ms-settings:nightlight" => Some("display"),
+        "ms-settings:sound" => Some("sound"),
+        "ms-settings:personalization" | "ms-settings:colors" | "ms-settings:personalization-colors" | "ms-settings:themes" => Some("personalization"),
+        "ms-settings:powersleep" | "ms-settings:storagesense" | "ms-settings:batterysaver" => Some("power"),
+        "ms-settings:network-status" | "ms-settings:network-wifi" | "ms-settings:network-wifisettings" | "ms-settings:network-vpn" | "ms-settings:network-proxy" => Some("network"),
+        "ms-settings:bluetooth" | "ms-settings:network-airplanemode" => Some("bluetooth"),
+        "ms-settings:appsfeatures" => Some("apps"),
+        "ms-settings:windowsupdate" => Some("update"),
+        "ms-settings:about" => Some("about"),
+        _ => None,
+    }
+}
+
+/// rust-settings.exe where the installer puts it: Program Files is writable by administrators only (a user-writable
+/// folder would let any program swap the exe that Win+I starts).
+fn own_exe() -> Option<std::path::PathBuf> {
+    let exe = std::path::PathBuf::from(std::env::var_os("ProgramFiles")?).join("rust-settings").join("rust-settings.exe");
+    exe.is_file().then_some(exe)
+}
+
 /// `uri` is passed through the environment, never spliced into the script. A second call while the first still waits is harmless.
 pub fn open(uri: &str) {
+    if let (Some(page), Some(exe)) = (own_page(uri), own_exe()) {
+        if Command::new(exe).arg(page).stdin(Stdio::null()).creation_flags(0x0800_0000).spawn().is_ok() {
+            return;
+        }
+    }
     let _ = Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", PS])
         .env("WR_URI", uri).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).creation_flags(0x0800_0000).spawn();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::own_page;
+
+    #[test]
+    fn only_exact_addresses_go_to_rust_settings() {
+        assert_eq!(own_page("ms-settings:"), Some("display"));
+        assert_eq!(own_page("MS-Settings:Sound"), Some("sound"));
+        assert_eq!(own_page("ms-settings:themes"), Some("personalization"));
+        assert_eq!(own_page("ms-settings:powersleep"), Some("power"));
+        assert_eq!(own_page("ms-settings:network-status"), Some("network"));
+        assert_eq!(own_page("ms-settings:personalization-background"), None);
+        assert_eq!(own_page("ms-settings:network-wifi"), Some("network"));
+        assert_eq!(own_page("ms-settings:bluetooth"), Some("bluetooth"));
+        assert_eq!(own_page("ms-settings:windowsupdate"), Some("update"));
+        assert_eq!(own_page("ms-settings:easeofaccess"), None);
+        assert_eq!(own_page("ms-settings:sound; calc"), None);
+    }
 }

@@ -16,9 +16,9 @@ use windows_sys::Win32::{
 const WM_DONE: u32 = WM_APP + 1; // lparam = Box<Result<Tree, String>>
 const DRIVE_FIXED: u32 = 3;
 const MAX_CELLS: usize = 300;
-const BG: u32 = rgb(22, 19, 18);
-const DIM: u32 = rgb(166, 152, 145);
-const ACCENT: u32 = rgb(222, 98, 42);
+const BG: u32 = rgb(22, 22, 24);
+const DIM: u32 = rgb(142, 142, 147);
+const ACCENT: u32 = rgb(10, 132, 255);
 
 const fn rgb(r: u8, g: u8, b: u8) -> u32 {
     r as u32 | (g as u32) << 8 | (b as u32) << 16
@@ -114,7 +114,7 @@ fn squarify(items: &[(u32, u64)], (mut x, mut y, mut w, mut h): (f64, f64, f64, 
 fn color(name: &str, dir: bool) -> u32 {
     let key = if dir { name } else { name.rsplit_once('.').map_or("", |e| e.1) };
     let hue = (key.bytes().fold(7u32, |a, b| a.wrapping_mul(31).wrapping_add(b.to_ascii_lowercase() as u32)) % 360) as f64;
-    let (s, v) = if dir { (0.35, 0.42) } else { (0.5, 0.72) };
+    let (s, v) = if dir { (0.28, 0.36) } else { (0.42, 0.66) }; // muted: the map reads calm, the labels stay legible
     let f = |n: f64| {
         let k = (n + hue / 60.0) % 6.0;
         ((v - v * s * k.min(4.0 - k).clamp(0.0, 1.0)) * 255.0) as u8
@@ -224,7 +224,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
         match msg {
             WM_CREATE => {
                 let dpi = GetDpiForSystem() as i32;
-                let f = CreateFontW(-(15 * dpi / 96), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, wide("Segoe UI").as_ptr());
+                let f = CreateFontW(-(15 * dpi / 96), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, wide(winrust_common::style::sans_face()).as_ptr());
                 APP.with_borrow_mut(|a| (a.dpi, a.font) = (dpi, f as isize));
                 0
             }

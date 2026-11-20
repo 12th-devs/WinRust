@@ -41,14 +41,14 @@ use windows_sys::Win32::{
     UI::{Input::KeyboardAndMouse::*, WindowsAndMessaging::*},
 };
 
-const BG: u32 = rgb(22, 19, 18);
-const PANEL: u32 = rgb(36, 31, 29);
-const BORDER: u32 = rgb(60, 51, 47);
-const TEXT: u32 = rgb(255, 255, 255);
-const DIM: u32 = rgb(166, 152, 145);
-const ACCENT: u32 = rgb(222, 98, 42); // rust orange
-const GOOD: u32 = rgb(110, 200, 120);
-const BAD: u32 = rgb(255, 99, 97);
+const BG: u32 = rgb(22, 22, 24); // the shared WinRust graphite (common/src/style.rs, normal style)
+const PANEL: u32 = rgb(34, 34, 38);
+const BORDER: u32 = rgb(50, 50, 55);
+const TEXT: u32 = rgb(245, 245, 247);
+const DIM: u32 = rgb(142, 142, 147);
+const ACCENT: u32 = rgb(10, 132, 255);
+const GOOD: u32 = winrust_common::style::GOOD;
+const BAD: u32 = winrust_common::style::BAD;
 const WM_DONE: u32 = WM_APP + 1;
 const WM_MOUSELEAVE: u32 = 0x02A3; // not exported by windows-sys under the enabled features
 
@@ -135,6 +135,16 @@ const PLUGINS: &[Plugin] = &[
         settings: false,
         bulk: true,
         glyph: "\u{E91B}", // picture
+    },
+    Plugin {
+        name: "rust-settings",
+        desc: Tr("Параметры на Rust: экран (разрешение, частота), звук (громкость), тема, о системе. Win+I и меню панели открывают их, а не Параметры Windows, поэтому Проводник не нужен. Остальные разделы открывают системные.", "Settings in Rust: display (resolution, refresh rate), sound (volume), theme, about. Win+I and the bar menus open it instead of Windows Settings, so Explorer is not needed. Other pages open the system ones."),
+        warn: Tr("Ничего системного не меняется: файл в Program Files и ярлык «WinRust Settings» в меню Пуск. Win+I начинает открывать это окно; удалите плагин, и всё вернётся.", "Nothing in the system is changed: a file in Program Files and a 'WinRust Settings' Start menu shortcut. Win+I starts opening this window; uninstall the plugin and it goes back."),
+        installed: || st_dir().join("rust-settings.exe").is_file(),
+        actions: Some((st_install, st_uninstall)),
+        settings: false,
+        bulk: true,
+        glyph: "\u{E713}", // settings
     },
     Plugin {
         name: "debloat",

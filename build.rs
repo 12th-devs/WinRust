@@ -2,6 +2,7 @@ use std::{env, fs, path::Path};
 
 fn main() {
     println!("cargo:rerun-if-changed=app.rc");
+    println!("cargo:rerun-if-changed=app.ico");
     println!("cargo:rerun-if-changed=app.manifest");
     println!("cargo:rerun-if-changed=payload.txt");
     embed_resource::compile("app.rc", embed_resource::NONE).manifest_required().unwrap();

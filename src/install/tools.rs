@@ -1,4 +1,4 @@
-//! wiztree, photoview, debloat, purge: small stand-alone tools, one exe each in its own Program Files folder.
+//! wiztree, photoview, rust-settings, debloat, purge: small stand-alone tools, one exe each in its own Program Files folder.
 use crate::*;
 
 // ---------- wiztree, photoview, debloat: small stand-alone tools, one exe each in its own Program Files folder ----------
@@ -9,6 +9,10 @@ pub(crate) fn wz_dir() -> PathBuf {
 
 pub(crate) fn pv_dir() -> PathBuf {
     program_files().join("photoview")
+}
+
+pub(crate) fn st_dir() -> PathBuf {
+    program_files().join("rust-settings")
 }
 
 pub(crate) fn pu_dir() -> PathBuf {
@@ -39,6 +43,18 @@ pub(crate) fn tool_remove(exe: &str, dir: &Path, lnk: Option<&str>) {
     }
     let _ = run("taskkill", &["/f", "/im", exe]);
     let _ = fs::remove_dir_all(dir);
+}
+
+pub(crate) fn st_install() -> Result<(), String> {
+    tool_install("rust-settings.exe", &st_dir(), Some("WinRust Settings"))
+}
+
+pub(crate) fn st_uninstall() -> Result<(), String> {
+    tool_remove("rust-settings.exe", &st_dir(), Some("WinRust Settings")); // also ends the night-light helper (same exe)
+    // what the night-light switch left for the user: its autostart value and its setting
+    let _ = run("reg", &["delete", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "WinRustNightLight", "/f"]);
+    let _ = run("reg", &["delete", r"HKCU\Software\WinRust\NightLight", "/f"]);
+    Ok(())
 }
 
 pub(crate) fn wz_install() -> Result<(), String> {

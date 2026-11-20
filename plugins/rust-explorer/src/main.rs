@@ -26,9 +26,21 @@ static DESKTOP: AtomicBool = AtomicBool::new(false);
 fn desk() -> bool { DESKTOP.load(Relaxed) }
 const CLR_NONE: isize = 0xFFFF_FFFF; // list background / text background: let the parent's wallpaper show through
 thread_local! { static WALL: std::cell::Cell<(isize, i32, i32)> = const { std::cell::Cell::new((0, 0, 0)) }; } // (HBITMAP, w, h)
-/// Margins of the desktop's icon list: the bar sits at the bottom. shortcut: assumes the bar is at most 44 px (scaled); it may not reserve the work area.
-fn desk_top() -> i32 { ui::sc(8) }
-fn desk_bottom() -> i32 { ui::sc(44) }
+/// What the bar reserves at the top and bottom of the screen: the work area topbar sets when there is no explorer.
+fn work_strips() -> (i32, i32) {
+    let mut r: RECT = unsafe { std::mem::zeroed() };
+    if unsafe { SystemParametersInfoW(SPI_GETWORKAREA, 0, &mut r as *mut _ as *mut _, 0) } == 0 { return (0, 0); }
+    (r.top.max(0), (unsafe { GetSystemMetrics(SM_CYSCREEN) } - r.bottom).max(0))
+}
+/// Margins of the desktop's icon list, from the bar's real size: its reserved strip (any height, top or bottom).
+/// The dock style reserves nothing but floats over the bottom edge, so it gets a fixed gap while topbar runs.
+fn desk_top() -> i32 { work_strips().0 + ui::sc(8) }
+fn desk_bottom() -> i32 {
+    let reserved = work_strips().1;
+    if reserved > 0 { return reserved + ui::sc(4); }
+    let bar_up = unsafe { !FindWindowW(w("topbar").as_ptr(), ptr::null()).is_null() };
+    if bar_up && winrust_common::style::style() == winrust_common::style::Style::Dock { ui::sc(52) } else { ui::sc(8) }
+}
 const THUMB: i32 = 96;
 const WM_THUMB: u32 = WM_APP + 2; // worker -> UI: wp = Box<(era, row, HBITMAP)>
 static GEN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0); // bumped on every new listing; stale thumbnails are dropped
@@ -195,6 +207,15 @@ fn icon_of(p: &PathBuf, dir: bool) -> i32 {
 /// The tabs are painted by the chrome window from State.tabs: "setting a tab's text" is just a repaint.
 fn tab_text(tab: HWND, _i: usize, _text: &str, _insert: bool) {
     if !tab.is_null() { unsafe { InvalidateRect(tab, ptr::null(), 0) }; }
+}
+
+/// The text of a desktop row. Rows from the public desktop carry absolute paths: only the file name is shown, and shortcuts
+/// lose their ".lnk" / ".url" like in Explorer. Other windows show the row as it is.
+fn shown_name(name: &str, desktop: bool) -> String {
+    if !desktop { return name.to_string(); }
+    let file = std::path::Path::new(name).file_name().map_or_else(|| name.to_string(), |n| n.to_string_lossy().into_owned());
+    let lower = file.to_lowercase();
+    if lower.ends_with(".lnk") || lower.ends_with(".url") { file[..file.len() - 4].to_string() } else { file }
 }
 
 fn label(dir: &PathBuf) -> String {
@@ -984,6 +1005,17 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
                 load(h, start);
                 0
             }
+            // the bar came, went or changed size (it sets the work area), or the screen changed: the icon list follows
+            WM_SETTINGCHANGE | WM_DISPLAYCHANGE if desk() => {
+                if m == WM_DISPLAYCHANGE {
+                    SetWindowPos(h, HWND_BOTTOM, 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN), SWP_NOACTIVATE); // WM_SIZE lays out
+                } else if wp == SPI_SETWORKAREA as usize {
+                    let (list, mut r) = (ST.with_borrow(|st| st.list), std::mem::zeroed::<RECT>());
+                    GetClientRect(h, &mut r);
+                    MoveWindow(list, 0, desk_top(), r.right, (r.bottom - desk_top() - desk_bottom()).max(0), 1);
+                }
+                0
+            }
             WM_SIZE => {
                 let list = ST.with_borrow(|st| st.list);
                 let (cw, ch) = ((lp & 0xFFFF) as i32, ((lp >> 16) & 0xFFFF) as i32);
@@ -1037,7 +1069,7 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
                             let Some(i) = usize::try_from(it.iItem).ok() else { return };
                             let Some(r) = rows.get_mut(i) else { return };
                             if it.mask & LVIF_TEXT != 0 && it.cchTextMax > 0 {
-                                let s = match it.iSubItem { 0 => r.name.clone(), 1 => date_text(r.time), 2 => type_text(&r.name, r.dir), _ if r.dir => String::new(), _ => size_text(r.size) };
+                                let s = match it.iSubItem { 0 => shown_name(&r.name, desk()), 1 => date_text(r.time), 2 => type_text(&r.name, r.dir), _ if r.dir => String::new(), _ => size_text(r.size) };
                                 let u: Vec<u16> = s.encode_utf16().take(it.cchTextMax as usize - 1).collect();
                                 ptr::copy_nonoverlapping(u.as_ptr(), it.pszText, u.len());
                                 *it.pszText.add(u.len()) = 0;
@@ -1102,6 +1134,8 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
                         match vk {
                             0x08 => if let Some(p) = dir.parent() { load(h, p.to_path_buf()) },
                             0x2E if !paths.is_empty() => { let _ = sh::fileop(h, sh::Op::Delete, &paths, &dir); }
+                            // Space on a picture: a quick look in photoview (pictures only: videos and text are not previewed yet)
+                            0x20 if !desk() => if let (Some(p), Some(exe)) = (paths.first().filter(|p| is_pic(p)), tool("photoview")) { let _ = std::process::Command::new(exe).arg(p).spawn(); },
                             0x71 => {
                                 let i = put(list, LVM_GETNEXTITEM, usize::MAX, LVNI_SELECTED as isize);
                                 if i >= 0 { put(list, LVM_EDITLABELW, i as usize, 0); }
@@ -1241,6 +1275,14 @@ mod tests {
 
     fn r(name: &str, dir: bool, size: u64, time: u64) -> Row { Row { name: name.into(), dir, size, time, icon: -1, thumb: -2 } }
     fn names(v: &[Row]) -> Vec<&str> { v.iter().map(|r| r.name.as_str()).collect() }
+
+    #[test]
+    fn desktop_rows_show_file_names_without_shortcut_extensions() {
+        assert_eq!(shown_name(r"C:\Users\Public\Desktop\Steam.lnk", true), "Steam");
+        assert_eq!(shown_name("Notes.txt", true), "Notes.txt");
+        assert_eq!(shown_name(r"C:\x\Game.URL", true), "Game");
+        assert_eq!(shown_name(r"C:\x\Steam.lnk", false), r"C:\x\Steam.lnk");
+    }
 
     #[test]
     fn folders_first_then_by_the_chosen_column() {

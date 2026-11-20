@@ -40,6 +40,7 @@ The installer is in English. The **Русский** button in its corner (or "Wi
 | **rust-explorer** | A file manager with tabs, and the desktop | Folders and drives open in it; **Explorer stops being the shell** (comes back by itself if topbar fails). Disables PcaSvc, InventorySvc, lfsvc, cbdhsvc, sets DoSvc to manual, merges svchost processes. Requires topbar |
 | **wiztree** | A disk-usage map ("WinRust Disk" in Start) | Nothing, apart from the file and a shortcut |
 | **photoview** | A fast photo viewer | Adds it to "Open with" (it does not become the default) |
+| **rust-settings** | Settings in Rust: display (resolution, refresh rate), sound (volume), power plan and drive space, per-app volume and device choice, night light, display arrangement by dragging, network adapters, Wi-Fi on every adapter (password or 802.1X), VPN and proxy, Bluetooth, apps, Windows Update, disk cleanup, theme, about | Nothing, apart from the file and a shortcut. Win+I and the bar menus open this window instead of Windows Settings (only a few rare pages still open the system ones) |
 | **debloat** | Off: telemetry, Copilot, Recall, Start ads, Edge in the background | Services and registry policies; old values are saved and restored on uninstall. **Command line only:** `install debloat --yes` |
 | **purge** | Removes the bundled junk like Tiny11 does: Clipchamp, News, Weather, Xbox overlays, Teams, Cortana, Widgets, Skype and more, plus telemetry tasks | **IRREVERSIBLE, no undo.** Apps are removed for all users and from the image; the Store, Settings, Start and runtimes stay. Run `purge.exe` first: it only lists. **Command line only:** `install purge --yes` (OneDrive and Edge: `purge.exe --apply --onedrive --edge`) |
 | chrome-rs | A browser | Not installable yet |
@@ -55,7 +56,8 @@ The gear at the left end of the bar opens **Style**. The choice applies at once 
 | **Normal** | Windows 11 blue, the bar at the bottom |
 | **Terminal** | Green on black, Consolas, square corners |
 | **Floating dock** | A pill-shaped bar in the middle; maximized windows get the whole screen, the dock slides away over them and comes back at the bottom edge |
-| **Tiling** | A thin bar at the top, amber accent, square corners; "Tile the windows" puts the open windows side by side |
+| **Tiling** | A thin bar at the top, amber accent, rounded like Normal; "Tile the windows" puts the open windows side by side |
+| **White road** | Light ivory with gold: faint low-poly triangles, some traced in gold, behind the bar, its panels and rust-settings |
 
 The choice is stored in `%ProgramData%\WinRust\style.txt`.
 

@@ -9,7 +9,7 @@ pub const NAV_W_OPEN: f64 = 220.0;
 pub const BAND_H: f64 = 52.0;
 
 pub fn series_color(i: usize, dark: bool) -> Rgb {
-    let c = [Rgb(23, 169, 208), Rgb(86, 124, 214), Rgb(82, 177, 95), Rgb(224, 138, 60), Rgb(176, 92, 216)][i.min(4)];
+    let c = [Rgb(10, 132, 255), Rgb(94, 92, 230), Rgb(48, 209, 88), Rgb(255, 159, 10), Rgb(191, 90, 242)][i.min(4)]; // Apple system blue, indigo, green, orange, purple
     if dark { c } else { c.lerp(Rgb(0, 0, 0), 0.18) }
 }
 
@@ -95,7 +95,7 @@ impl App {
             }
             let c = if enabled { th.text } else { th.dim.lerp(th.bg, 0.35) };
             let gr = R::new(r.l + g.px(8.0), r.t, r.l + g.px(30.0), r.b);
-            g.glyph(gr, *glyph, if enabled && *btn == Btn::Efficiency { Rgb(110, 200, 120) } else { c }, true);
+            g.glyph(gr, *glyph, if enabled && *btn == Btn::Efficiency { Rgb(48, 209, 88) } else { c }, true);
             if !label.is_empty() {
                 g.text(R::new(r.l + g.px(32.0), r.t, r.r - g.px(8.0), r.b), label, Font::Ui, c);
             }

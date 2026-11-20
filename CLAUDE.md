@@ -31,7 +31,7 @@
 ## Обновить установленный плагин после правки (без пересборки установщика)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\update-plugin.ps1 <rust-search|rtaskmgr-win32|topbar|rust-explorer|wiztree|photoview|debloat>
+powershell -ExecutionPolicy Bypass -File scripts\update-plugin.ps1 <rust-search|rtaskmgr-win32|topbar|rust-explorer|wiztree|photoview|rust-settings|debloat>
 ```
 
 Скрипт пересобирает плагины, обновляет `payload\` и запускает `plugin-launcher update <плагин>` через explorer.exe. Появится окно UAC: **«Да» нажимает пользователь**. Не обходи UAC и не меняй его настройки.

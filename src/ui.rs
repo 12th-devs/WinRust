@@ -70,11 +70,11 @@ impl Ui {
         DeleteObject(f);
     }
     unsafe fn text(&self, s: &str, b: Box4, size: f32, weight: i32, color: u32, flags: u32) {
-        self.text_in(s, b, size, weight, color, flags, "Segoe UI");
+        self.text_in(s, b, size, weight, color, flags, winrust_common::style::sans_face());
     }
     /// Width of a single line of text, logical px.
     unsafe fn width(&self, s: &str, size: f32, weight: i32) -> f32 {
-        let f = self.font(size, weight, "Segoe UI");
+        let f = self.font(size, weight, winrust_common::style::sans_face());
         let of = SelectObject(self.dc, f);
         let mut r: RECT = zeroed();
         DrawTextW(self.dc, wide(s).as_ptr(), -1, &mut r, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
@@ -249,13 +249,13 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         let sel = SELECTED[i].load(Relaxed);
         ui.round(cb, 5.0, if sel { ACCENT } else { PANEL }, if sel { ACCENT } else { lerp(BORDER, TEXT, if hot(ID_CHECK + i) { 0.4 } else { 0.0 }) });
         if sel {
-            ui.text_in("\u{E73E}", cb, 11.0, 700, rgb(255, 255, 255), DT_CENTER | DT_VCENTER | DT_SINGLELINE, "Segoe MDL2 Assets");
+            ui.text_in("\u{E73E}", cb, 11.0, 700, rgb(255, 255, 255), DT_CENTER | DT_VCENTER | DT_SINGLELINE, winrust_common::style::icon_face());
         }
         let tile = [r[0] + 42.0, r[1] + 13.0, r[0] + 78.0, r[1] + 49.0];
         let lit = installed || working;
         let tint = if lit { lerp(PANEL, ACCENT, 0.20) } else { lerp(PANEL, TEXT, 0.06) };
         ui.round(tile, 9.0, tint, tint);
-        ui.text_in(p.glyph, tile, 16.0, 400, if lit { ACCENT } else { TEXT }, DT_CENTER | DT_VCENTER | DT_SINGLELINE, "Segoe MDL2 Assets");
+        ui.text_in(p.glyph, tile, 16.0, 400, if lit { ACCENT } else { TEXT }, DT_CENTER | DT_VCENTER | DT_SINGLELINE, winrust_common::style::icon_face());
 
         let (pill, pc) = if working {
             (if job == n { t!("Удаление…", "Removing…") } else { t!("Установка…", "Installing…") }, ACCENT)
@@ -282,7 +282,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         if let Some((_, gb)) = gear.filter(|&(gi, _)| gi == i && installed) {
             let h = hot(ID_GEAR) && !busy;
             ui.round(gb, 8.0, if h { lerp(PANEL, TEXT, 0.08) } else { PANEL }, BORDER);
-            ui.text_in("\u{E713}", gb, 14.0, 400, if busy { DIM } else { TEXT }, DT_CENTER | DT_VCENTER | DT_SINGLELINE, "Segoe MDL2 Assets");
+            ui.text_in("\u{E713}", gb, 14.0, 400, if busy { DIM } else { TEXT }, DT_CENTER | DT_VCENTER | DT_SINGLELINE, winrust_common::style::icon_face());
         }
     }
 
@@ -319,7 +319,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         ui.round(mb, 12.0, fill, if all { BORDER } else { fill });
         let tw = ui.width(&label, 16.0, 700);
         let cx = (mb[0] + mb[2]) / 2.0 + 13.0;
-        ui.text_in(if all { "\u{E72C}" } else { "\u{E896}" }, [cx - tw / 2.0 - 30.0, mb[1], cx - tw / 2.0 - 6.0, mb[3]], 15.0, 400, fg, DT_CENTER | DT_VCENTER | DT_SINGLELINE, "Segoe MDL2 Assets");
+        ui.text_in(if all { "\u{E72C}" } else { "\u{E896}" }, [cx - tw / 2.0 - 30.0, mb[1], cx - tw / 2.0 - 6.0, mb[3]], 15.0, 400, fg, DT_CENTER | DT_VCENTER | DT_SINGLELINE, winrust_common::style::icon_face());
         ui.text(&label, [cx - tw / 2.0, mb[1], cx + tw / 2.0 + 4.0, mb[3]], 16.0, 700, fg, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     }
 
@@ -354,7 +354,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         let icon = [d[0] + 24.0, d[1] + 24.0, d[0] + 60.0, d[1] + 60.0];
         let tint = lerp(PANEL, accent, 0.18);
         ui.round(icon, 18.0, tint, tint);
-        ui.text_in(if danger { "\u{E7BA}" } else { "\u{E946}" }, icon, 16.0, 400, accent, DT_CENTER | DT_VCENTER | DT_SINGLELINE, "Segoe MDL2 Assets");
+        ui.text_in(if danger { "\u{E7BA}" } else { "\u{E946}" }, icon, 16.0, 400, accent, DT_CENTER | DT_VCENTER | DT_SINGLELINE, winrust_common::style::icon_face());
         ui.text(&title, [icon[2] + 14.0, d[1] + 24.0, d[2] - 24.0, d[1] + 60.0], 17.0, 600, TEXT, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         ui.text(&text, [d[0] + 24.0, d[1] + 76.0, d[2] - 24.0, cancel[1] - 12.0], 12.5, 400, DIM, DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS);
         button(&ui, cancel, t!("Отмена", "Cancel"), 1, hot(ID_CANCEL));
@@ -371,7 +371,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         let icon = [d[0] + 24.0, d[1] + 24.0, d[0] + 60.0, d[1] + 60.0];
         let tint = lerp(PANEL, ACCENT, 0.18);
         ui.round(icon, 18.0, tint, tint);
-        ui.text_in("\u{E713}", icon, 16.0, 400, ACCENT, DT_CENTER | DT_VCENTER | DT_SINGLELINE, "Segoe MDL2 Assets");
+        ui.text_in("\u{E713}", icon, 16.0, 400, ACCENT, DT_CENTER | DT_VCENTER | DT_SINGLELINE, winrust_common::style::icon_face());
         ui.text(&tf!("Настройки {}", "{} settings", PLUGINS[i].name), [icon[2] + 14.0, d[1] + 24.0, d[2] - 24.0, d[1] + 60.0], 17.0, 600, TEXT, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         let row = [d[0] + 24.0, d[1] + 78.0, d[2] - 24.0, d[1] + 148.0];
         let hid = od_hidden();
