@@ -392,3 +392,137 @@ pub fn process_user(pid: u32) -> Option<String> {
     })
     .flatten()
 }
+
+// ---------- диагностика ----------
+
+/// Сумма по всем ядрам: (время ЦП всего, DPC, прерывания), в 100-нс единицах.
+pub type CpuTimes = (i64, i64, i64);
+
+pub fn cpu_times() -> Option<CpuTimes> {
+    #[link(name = "ntdll")]
+    unsafe extern "system" {
+        fn NtQuerySystemInformation(class: u32, info: *mut std::ffi::c_void, len: u32, ret: *mut u32) -> i32;
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct Spi {
+        idle: i64,
+        kernel: i64, // включает idle
+        user: i64,
+        dpc: i64,
+        interrupt: i64,
+        count: u32,
+    }
+    let mut buf = vec![Spi::default(); 1024];
+    let mut ret = 0u32;
+    let st = unsafe { NtQuerySystemInformation(8 /*SystemProcessorPerformanceInformation*/, buf.as_mut_ptr() as *mut _, (buf.len() * size_of::<Spi>()) as u32, &mut ret) };
+    if st < 0 {
+        return None;
+    }
+    let n = ret as usize / size_of::<Spi>();
+    Some(buf[..n].iter().fold((0, 0, 0), |a, c| (a.0 + c.kernel + c.user, a.1 + c.dpc, a.2 + c.interrupt)))
+}
+
+/// (DPC %, прерывания %) между двумя замерами.
+pub fn dpc_share(a: CpuTimes, b: CpuTimes) -> (f32, f32) {
+    let total = (b.0 - a.0) as f64;
+    if total <= 0.0 {
+        return (0.0, 0.0);
+    }
+    (((b.1 - a.1) as f64 / total * 100.0) as f32, ((b.2 - a.2) as f64 / total * 100.0) as f32)
+}
+
+/// Видимые окна верхнего уровня, которые Windows считает зависшими (не обрабатывают сообщения 5 с).
+pub fn hung_windows() -> Vec<(u32, String)> {
+    use winapi::shared::{minwindef::{BOOL, LPARAM}, windef::HWND};
+    use winapi::um::winuser::{EnumWindows, GetWindow, GetWindowTextW, GetWindowThreadProcessId, IsHungAppWindow, IsWindowVisible, GW_OWNER};
+    unsafe extern "system" fn cb(h: HWND, l: LPARAM) -> BOOL {
+        unsafe {
+            let v = &mut *(l as *mut Vec<(u32, String)>);
+            if IsWindowVisible(h) != 0 && GetWindow(h, GW_OWNER).is_null() && IsHungAppWindow(h) != 0 {
+                let mut buf = [0u16; 256];
+                let n = GetWindowTextW(h, buf.as_mut_ptr(), 256).max(0) as usize;
+                let mut pid = 0u32;
+                GetWindowThreadProcessId(h, &mut pid);
+                if n > 0 && !v.iter().any(|x| x.0 == pid) {
+                    v.push((pid, String::from_utf16_lossy(&buf[..n])));
+                }
+            }
+        }
+        1
+    }
+    let mut v: Vec<(u32, String)> = vec![];
+    unsafe { EnumWindows(Some(cb), &mut v as *mut _ as LPARAM) };
+    v
+}
+
+// ---------- запуск с обычными правами ----------
+
+/// Запускает `cmdline` с токеном процесса-донора из нашего сеанса (sihost.exe: есть всегда и работает без повышения).
+/// Иначе программа, закрытая профилем и запущенная обратно отсюда, унаследовала бы права администратора.
+pub fn run_unelevated(donors: &[u32], cmdline: &str) -> bool {
+    use winapi::um::{
+        processthreadsapi::{OpenProcessToken, PROCESS_INFORMATION, ProcessIdToSessionId, STARTUPINFOW},
+        securitybaseapi::DuplicateTokenEx,
+        winnt::{SecurityImpersonation, TOKEN_ASSIGN_PRIMARY, TOKEN_DUPLICATE, TOKEN_QUERY, TokenPrimary, MAXIMUM_ALLOWED},
+    };
+    #[link(name = "advapi32")]
+    unsafe extern "system" {
+        fn CreateProcessWithTokenW(tok: HANDLE, logon: u32, app: *const u16, cmd: *mut u16, flags: u32, env: *mut std::ffi::c_void, dir: *const u16, si: *mut STARTUPINFOW, pi: *mut PROCESS_INFORMATION) -> i32;
+    }
+    let mut mine = 0u32;
+    unsafe { ProcessIdToSessionId(std::process::id(), &mut mine) };
+    for &pid in donors {
+        let mut s = u32::MAX;
+        if unsafe { ProcessIdToSessionId(pid, &mut s) } == 0 || s != mine {
+            continue;
+        }
+        let ok = with_proc(pid, PROCESS_QUERY_LIMITED_INFORMATION, |h| unsafe {
+            let mut tok: HANDLE = null_mut();
+            if OpenProcessToken(h, TOKEN_DUPLICATE | TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY, &mut tok) == 0 {
+                return false;
+            }
+            let mut prim: HANDLE = null_mut();
+            let dup = DuplicateTokenEx(tok, MAXIMUM_ALLOWED, null_mut(), SecurityImpersonation, TokenPrimary, &mut prim) != 0;
+            CloseHandle(tok);
+            if !dup {
+                return false;
+            }
+            let mut si: STARTUPINFOW = std::mem::zeroed();
+            si.cb = size_of::<STARTUPINFOW>() as u32;
+            let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
+            let mut cmd = wide(cmdline);
+            let r = CreateProcessWithTokenW(prim, 0, std::ptr::null(), cmd.as_mut_ptr(), 0x0400 /*CREATE_UNICODE_ENVIRONMENT*/, null_mut(), std::ptr::null(), &mut si, &mut pi) != 0;
+            if r {
+                CloseHandle(pi.hProcess);
+                CloseHandle(pi.hThread);
+            }
+            CloseHandle(prim);
+            r
+        });
+        if ok == Some(true) {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(test)]
+mod diag_tests {
+    use super::*;
+
+    #[test]
+    fn dpc_share_and_times() {
+        assert_eq!(dpc_share((0, 0, 0), (1000, 20, 10)), (2.0, 1.0));
+        assert_eq!(dpc_share((5, 0, 0), (5, 1, 1)), (0.0, 0.0));
+        let t = cpu_times().expect("NtQuerySystemInformation(8)");
+        assert!(t.0 > 0 && t.1 >= 0 && t.2 >= 0);
+        let _ = hung_windows();
+    }
+}
+
+/// Завершает процесс (TerminateProcess).
+pub fn kill(pid: u32) -> bool {
+    use winapi::um::{processthreadsapi::TerminateProcess, winnt::PROCESS_TERMINATE};
+    with_proc(pid, PROCESS_TERMINATE, |h| unsafe { TerminateProcess(h, 1) != 0 }).unwrap_or(false)
+}

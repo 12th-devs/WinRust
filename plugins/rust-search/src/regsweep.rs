@@ -255,11 +255,12 @@ pub fn delete(hits: &[Hit]) -> Report {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::windows::process::CommandExt; // no console window per reg.exe
 
     #[test]
     fn scan_backup_delete_restore_in_the_real_registry() {
         let p = "C:\\rs-sweep-test-9f3a\\App";
-        let reg = |args: &[&str]| std::process::Command::new("reg").args(args).output().unwrap().status.success();
+        let reg = |args: &[&str]| std::process::Command::new("reg").args(args).creation_flags(0x0800_0000).output().unwrap().status.success();
         let base = "HKCU\\Software\\rs-sweep-test-9f3a";
         let _ = reg(&["delete", base, "/f"]);
         assert!(reg(&["add", &format!("{base}\\Run"), "/v", "x", "/d", &format!("\"{p}\\a.exe\" /s"), "/f"]));

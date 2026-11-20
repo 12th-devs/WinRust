@@ -1393,6 +1393,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::windows::process::CommandExt;
 
     #[test]
     fn wipe_unlocks_read_only_and_never_follows_junctions() {
@@ -1408,7 +1409,7 @@ mod tests {
         fs::set_permissions(&ro, perm).unwrap();
         fs::write(outside.join("keep.txt"), "keep").unwrap();
         let link = doomed.join("link");
-        assert!(std::process::Command::new("cmd").args(["/c", "mklink", "/J"]).arg(&link).arg(&outside).output().unwrap().status.success());
+        assert!(std::process::Command::new("cmd").args(["/c", "mklink", "/J"]).arg(&link).arg(&outside).creation_flags(0x0800_0000).output().unwrap().status.success());
 
         assert_eq!(measure(&doomed), (2, 1), "ro.txt + the junction itself, target not counted");
         let mut failed = Vec::new();

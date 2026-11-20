@@ -615,6 +615,7 @@ pub unsafe fn paint_status(h: HWND) {
             (s, 0) => format!("{}  \u{00B7}  {s} selected", items(n)),
             (s, b) => format!("{}  \u{00B7}  {s} selected  \u{00B7}  {}", items(n), size_text(b)),
         };
+        let left = crate::jobs::status_text().unwrap_or(left); // a copy, packing or unpacking in progress
         let by = ["Name", "Date", "Type", "Size"][SORT_COL.load(Relaxed).min(3)];
         let right = format!("{by} {}", if SORT_ASC.load(Relaxed) { "\u{2191}" } else { "\u{2193}" });
         let f = font(12, 400, ui_face()) as HFONT;

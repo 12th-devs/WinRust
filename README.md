@@ -35,9 +35,9 @@ The installer is in English. The **Русский** button in its corner (or "Wi
 | Plugin | What you get | What it changes in Windows |
 |---|---|---|
 | **rust-search** | File search over all NTFS drives, Alt+Space | Disables the Windows Search service, blocks SearchHost.exe, hides the taskbar search box |
-| **rtaskmgr-win32** | Task Manager (Ctrl+Shift+Esc opens it) | `taskmgr.exe` is redirected to it (the system file is untouched). Also installs the **rs-du** disk cleaner |
+| **rtaskmgr-win32** | Task Manager (Ctrl+Shift+Esc opens it) | `taskmgr.exe` is redirected to it (the system file is untouched). Also installs the **rs-du** disk cleaner. The **Speed** page has opt-in, reversible switches: Game / Work profiles (stop background services, close launchers or sync apps, start them again), clear the memory standby cache (now, or automatically while topbar runs), block the Windows Start menu, widgets and Phone Link processes, one weekly `winget upgrade` instead of third-party updaters, Defender exclusions for build caches and game libraries, faster NTFS (no last-access times, no 8.3 names), an ad-blocking hosts file. **Startup** also lists logon/boot tasks and third-party auto-start services, with how much each slowed the last boots (Windows' own boot log). **What's slow** shows driver time (DPC/interrupts), hung windows, slow disk and boot times. Uninstall turns all of it back |
 | **topbar** | A Windows 11-style bottom bar: windows, clock, volume, menus | Hides the stock taskbar. Also installs **reshell** (hotkeys: Win+1/2/3 and Win+\` switch desktops, Win+D shows the desktop, Win+I opens Settings, Win+E the file manager; brings the taskbar back if the bar dies), **rs-du**, and a block in your PowerShell profile (`zoxide`, `grep`=rg, `ll`=eza, `cat`=bat; does nothing if they are missing) |
-| **rust-explorer** | A file manager with tabs, and the desktop | Folders and drives open in it; **Explorer stops being the shell** (comes back by itself if topbar fails). Disables PcaSvc, InventorySvc, lfsvc, cbdhsvc, sets DoSvc to manual, merges svchost processes. Requires topbar |
+| **rust-explorer** | A file manager with tabs, and the desktop | Folders and drives open in it; **Explorer stops being the shell** (comes back by itself if topbar fails). Disables PcaSvc, InventorySvc, lfsvc, cbdhsvc, sets DoSvc to manual, merges svchost processes. Its own copier (several files at once on SSDs, unbuffered for big files, progress in the status line) and right-click **Compress to ZIP** (all cores) / **Extract here** (ZIP and 7z). Requires topbar |
 | **wiztree** | A disk-usage map ("WinRust Disk" in Start) | Nothing, apart from the file and a shortcut |
 | **photoview** | A fast photo viewer | Adds it to "Open with" (it does not become the default) |
 | **rust-settings** | Settings in Rust: display (resolution, refresh rate), sound (volume), power plan and drive space, per-app volume and device choice, night light, display arrangement by dragging, network adapters, Wi-Fi on every adapter (password or 802.1X), VPN and proxy, Bluetooth, apps, Windows Update, disk cleanup, theme, about | Nothing, apart from the file and a shortcut. Win+I and the bar menus open this window instead of Windows Settings (only a few rare pages still open the system ones) |
@@ -72,11 +72,14 @@ One-off measurements on one machine (Windows 11 IoT Enterprise 10.0.26300, RTX 4
 | Open a folder window (rust-explorer, median of 5 runs) | 420 ms | 60 ms | **86%** faster |
 | Shell memory (topbar + rust-explorer + rs-shell + reshell vs explorer.exe) | 366 MB | 46 MB | **87%** less |
 | Same, plus the search index (53 MB) | 366 MB | 99 MB | **73%** less |
-| File manager binary size | 3,280 KB | 498 KB | **85%** smaller |
-| Task manager binary size | 5,791 KB | 869 KB | **85%** smaller |
+| File manager binary size (now with ZIP and 7z inside) | 3,280 KB | 1,179 KB | **64%** smaller |
+| Task manager binary size | 5,791 KB | 954 KB | **84%** smaller |
 | Idle CPU of the bar (topbar after optimization, % of one core) | 0.00–0.10% (explorer) | 0.05–0.10% | on par with Explorer |
+| Copy 5,000 small files, ~160 MB (rust-explorer: IFileOperation, Explorer's engine, vs its own copier) | 16.3 s | 2.3 s | **86%** faster (7x) |
+| Copy one 1 GB file (same) | 0.58 s | 0.60 s | equal |
+| Pack the same 5,000 files into ZIP (`Compress-Archive` vs rust-explorer's Compress to ZIP) | 48.4 s | 0.75 s | **98%** faster (64x) |
 
-In short: **85–99% faster or smaller in every size/speed test, and equal on idle CPU.** Caveats: rs searches a ready-made MFT index (it pays 53 MB of memory for that), while `dir` and PowerShell walk the disk from scratch; explorer.exe was still running with its windows during the test, so the memory gain is slightly overstated; Windows Search and the stock Task Manager were not compared.
+In short: **64–99% faster or smaller in the size/speed tests, equal on idle CPU and on copying one big file.** Caveats: rs searches a ready-made MFT index (it pays 53 MB of memory for that), while `dir` and PowerShell walk the disk from scratch; explorer.exe was still running with its windows during the test, so the memory gain is slightly overstated; Windows Search and the stock Task Manager were not compared. The copy and ZIP runs (`cargo test -p rust-explorer --release bench -- --ignored`) were single runs on data that was just written, so both sides read from the memory cache; our ZIP was slightly bigger (0.9 MB vs 0.7 MB) because each file is compressed on its own core.
 
 ## Screenshots
 

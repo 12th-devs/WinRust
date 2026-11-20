@@ -2,12 +2,13 @@
 //! process/registry helpers, the embedded payload, and one file per plugin with its install/uninstall pair.
 use crate::*;
 mod explorer;
+mod journal;
 mod search;
 mod session;
 mod taskmgr;
 mod tools;
 mod topbar;
-pub(crate) use {explorer::*, search::*, session::*, taskmgr::*, tools::*, topbar::*};
+pub(crate) use {explorer::*, journal::*, search::*, session::*, taskmgr::*, tools::*, topbar::*};
 
 pub(crate) fn out(prog: &str, args: &[&str]) -> Result<String, String> {
     // reg.exe: HKCU means the signed-in user's, not the elevated account's (see session.rs)

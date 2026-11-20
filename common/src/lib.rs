@@ -9,6 +9,8 @@ use std::{
 };
 
 pub mod desktop;
+pub mod journal;
+pub mod mem;
 pub mod mft;
 pub mod reg;
 pub mod settings;

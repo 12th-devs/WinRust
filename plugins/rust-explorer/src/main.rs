@@ -20,6 +20,7 @@
 use std::{cell::RefCell, env, fs, os::windows::fs::MetadataExt, path::{Path, PathBuf}, ptr, sync::atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed}};
 use windows_sys::Win32::{Foundation::*, Graphics::Gdi::{BLACK_BRUSH, GetStockObject, InvalidateRect}, System::LibraryLoader::GetModuleHandleW, UI::{Controls::*, Input::KeyboardAndMouse::{GetKeyState, SetFocus, VK_CONTROL}, Shell::*, WindowsAndMessaging::*}};
 
+mod jobs; // our own copier, ZIP packer, ZIP/7z unpacker (background, progress in the status line)
 mod ui; // the look: palette, painted tabs / toolbar / address pill / status line, dark theme
 
 static DESKTOP: AtomicBool = AtomicBool::new(false);
@@ -73,6 +74,7 @@ static SORT_ASC: AtomicBool = AtomicBool::new(true);
 static SHOW_HIDDEN: AtomicBool = AtomicBool::new(false); // Ctrl+H
 static NAV: AtomicBool = AtomicBool::new(false); // loading from the back / forward trail: do not record it again
 const WM_NAV: u32 = WM_APP + 3; // wp: 1 back, 2 forward, 3 properties, 4 up (sent from the message loop for Alt+key)
+const WM_JOB: u32 = WM_APP + 5; // jobs.rs worker finished: wp = Box<Option<String>> (the error, if any)
 
 fn row(name: String, m: Option<&fs::Metadata>) -> Row {
     Row { name, dir: m.is_some_and(|m| m.is_dir()), size: m.map_or(0, |m| m.len()), time: m.map_or(0, |m| m.last_write_time()), icon: -1, thumb: -2 }
@@ -139,10 +141,38 @@ fn new_entry(dir: &PathBuf, base: &str, folder: bool) {
 }
 
 /// Pastes what is on the system clipboard (files copied or cut here or in any other file manager).
+/// Copies and moves to another drive run in our own copier (jobs.rs: parallel on SSDs, unbuffered for big files); moves on the
+/// same drive (a rename), shell items, and folders that need elevation go through the shell.
 fn paste(h: HWND, dir: &PathBuf) {
     let Some((paths, cut)) = sh::clip_get() else { return };
-    let _ = sh::fileop(h, if cut { sh::Op::Move } else { sh::Op::Copy }, &paths, dir);
+    let fast = jobs::can_fast_copy(&paths, dir) && !(cut && paths.iter().all(|p| jobs::same_volume(p, dir))) && jobs::writable(dir);
+    if fast && !jobs::busy() {
+        jobs::copy(h as isize, paths, dir.clone(), cut);
+    } else {
+        let _ = sh::fileop(h, if cut { sh::Op::Move } else { sh::Op::Copy }, &paths, dir);
+    }
     if cut { sh::clip_clear(); }
+}
+
+const MENU_ZIP: u32 = 0x9001;
+const MENU_EXTRACT: u32 = 0x9002;
+
+/// The shell menu for the selection, with our "Compress to ZIP" / "Extract here" on top.
+fn item_menu(h: HWND, dir: &Path, paths: &[PathBuf]) {
+    let mut extra = vec![(MENU_ZIP, "Compress to ZIP")];
+    if paths.iter().all(|p| p.is_file() && jobs::is_archive(p)) {
+        extra.insert(0, (MENU_EXTRACT, "Extract here"));
+    }
+    let picked = sh::show(h, paths, if jobs::busy() { &[] } else { &extra }).ok().flatten();
+    match picked {
+        Some(MENU_ZIP) => {
+            let base = if paths.len() == 1 { paths[0].file_stem().unwrap_or_default().to_string_lossy().into_owned() } else { dir.file_name().map_or("Archive".into(), |n| n.to_string_lossy().into_owned()) };
+            let dest = jobs::free_name(dir, &format!("{base}.zip"), false);
+            jobs::zip(h as isize, paths.to_vec(), dest);
+        }
+        Some(MENU_EXTRACT) => _ = jobs::extract(h as isize, paths.to_vec(), dir.to_path_buf()),
+        _ => reload(h),
+    }
 }
 
 /// Right click on empty space: the folder's own menu.
@@ -593,23 +623,36 @@ mod sh {
         CM2.with_borrow(|c| c.as_ref().is_some_and(|c| unsafe { c.HandleMenuMsg(m, WPARAM(wp), LPARAM(lp)).is_ok() }))
     }
 
-    /// The real shell context menu for `paths`, so 7-Zip/Git/etc. entries show up.
-    pub fn show(h: *mut c_void, paths: &[PathBuf]) -> Result<()> {
+    /// The real shell context menu for `paths`, so 7-Zip/Git/etc. entries show up. `extra` = our own items on top
+    /// (ids above the shell's range); returns the one picked, None when the shell handled the pick or nothing was picked.
+    pub fn show(h: *mut c_void, paths: &[PathBuf], extra: &[(u32, &str)]) -> Result<Option<u32>> {
         unsafe {
             let hwnd = HWND(h);
             let cm: IContextMenu = ui(hwnd, paths)?;
             let menu = CreatePopupMenu()?;
             cm.QueryContextMenu(menu, 0, 1, 0x7FFF, CMF_NORMAL).ok()?;
+            if !extra.is_empty() {
+                let _ = InsertMenuW(menu, 0, MF_BYPOSITION | MF_SEPARATOR, 0, PCWSTR::null());
+                for (id, text) in extra.iter().rev() {
+                    let t: Vec<u16> = text.encode_utf16().chain([0]).collect();
+                    let _ = InsertMenuW(menu, 0, MF_BYPOSITION | MF_STRING, *id as usize, PCWSTR(t.as_ptr()));
+                }
+            }
             CM2.set(cm.cast::<IContextMenu2>().ok());
             let mut pt = POINT::default();
             GetCursorPos(&mut pt)?;
             let id = TrackPopupMenuEx(menu, TPM_RETURNCMD.0 | TPM_RIGHTBUTTON.0, pt.x, pt.y, hwnd, None).0;
             CM2.set(None);
+            if extra.iter().any(|e| e.0 as i32 == id) {
+                DestroyMenu(menu)?;
+                return Ok(Some(id as u32));
+            }
             if id > 0 {
                 let ci = CMINVOKECOMMANDINFO { cbSize: size_of::<CMINVOKECOMMANDINFO>() as u32, hwnd, lpVerb: PCSTR((id - 1) as usize as *const u8), nShow: SW_SHOWNORMAL.0, ..Default::default() };
                 cm.InvokeCommand(&ci)?;
             }
-            DestroyMenu(menu)
+            DestroyMenu(menu)?;
+            Ok(None)
         }
     }
 
@@ -1097,8 +1140,8 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
                         }
                     }
                     NM_RCLICK if nm.hwndFrom == list => {
-                        let (_, _, paths) = selected();
-                        if !paths.is_empty() { let _ = sh::show(h, &paths); reload(h); } else { bg_menu(h); }
+                        let (_, dir, paths) = selected();
+                        if !paths.is_empty() { item_menu(h, &dir, &paths); } else { bg_menu(h); }
                     }
                     LVN_COLUMNCLICK => {
                         let c = (*(lp as *const NMLISTVIEW)).iSubItem as usize;
@@ -1147,7 +1190,7 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
                                 put(edit, EM_SETSEL, 0, -1);
                                 return 0;
                             }
-                            0x5D if !paths.is_empty() => { let _ = sh::show(h, &paths); }
+                            0x5D if !paths.is_empty() => item_menu(h, &dir, &paths),
                             0x43 | 0x58 if ctrl && !paths.is_empty() => { let _ = sh::clip_set(h, &paths, vk == 0x58); return 0; }
                             0x56 if ctrl => paste(h, &dir),
                             0x4E if ctrl => new_entry(&dir, "New folder", true),
@@ -1182,6 +1225,13 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
             }
             WM_SETFOCUS => { SetFocus(ST.with_borrow(|st| st.list)); 0 }
             WM_APP => { reload(h); 0 }
+            WM_JOB => {
+                let err = *Box::from_raw(wp as *mut Option<String>);
+                reload(h);
+                ui::status_dirty(h);
+                if let Some(e) = err { MessageBoxW(h, w(&e).as_ptr(), w("WinRust Explorer").as_ptr(), MB_ICONWARNING); }
+                0
+            }
             WM_NAV => {
                 match wp {
                     1 => nav(h, true),

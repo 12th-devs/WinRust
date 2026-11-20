@@ -146,6 +146,12 @@ pub struct Data {
     /// Температуру GPU читаем, пока открыта страница GPU (или всегда, если включено в параметрах):
     /// опрос драйвера может будить дискретную видеокарту ноутбука.
     pub want_gpu_temp: bool,
+    cpu_times: Option<sys::CpuTimes>,
+    /// Доля времени ЦП в DPC и прерываниях (работа драйверов), % за последний такт
+    pub dpc_pct: f32,
+    pub intr_pct: f32,
+    /// Зависшие окна: (PID, заголовок)
+    pub hung: Vec<(u32, String)>,
 }
 
 pub fn timestamp() -> String {
@@ -208,6 +214,10 @@ impl Data {
             nvml_tried: false,
             user_cache: HashMap::new(),
             want_gpu_temp: false,
+            cpu_times: None,
+            dpc_pct: 0.0,
+            intr_pct: 0.0,
+            hung: vec![],
         }
     }
 
@@ -251,6 +261,12 @@ impl Data {
         }
         self.sample = self.perf.as_mut().map(|p| p.sample()).unwrap_or_default();
         self.meminfo = perf::mem_info();
+        let now = sys::cpu_times();
+        if let (Some(a), Some(b)) = (self.cpu_times, now) {
+            (self.dpc_pct, self.intr_pct) = sys::dpc_share(a, b);
+        }
+        self.cpu_times = now;
+        self.hung = sys::hung_windows();
         if self.want_gpu_temp || self.cfg.gpu_temp_always {
             for g in self.gpus.iter_mut() {
                 g.temp = gpu::temperature(g.adapter.luid).or_else(|| {
@@ -537,10 +553,60 @@ impl Data {
         if self.cpu_total > 90.0 {
             out.push(t!("ЦП почти полностью занят — отсортируйте процессы по ЦП, чтобы увидеть виновника.", "CPU is almost fully used - sort processes by CPU to see the culprit.").into());
         }
+        for (pid, title) in &self.hung {
+            let name = self.procs.iter().find(|p| p.pid == *pid).map_or_else(|| format!("PID {pid}"), |p| p.name.clone());
+            out.push(tf!("Не отвечает: «{title}» ({name}). Окно зависло: подождите или снимите задачу на странице «Процессы».", "Not responding: '{title}' ({name}). The window hangs: wait or end the task on the 'Processes' page."));
+        }
+        let drv = self.dpc_pct + self.intr_pct;
+        if drv >= 5.0 {
+            out.push(tf!("Драйверы заняли {:.1}% времени ЦП (DPC {:.1}%, прерывания {:.1}%; норма — до 2%). Так выглядит «драйвер тормозит систему»: трещит звук, дёргается мышь, проседают кадры. Чаще всего виноваты Wi-Fi/сеть, звук, видеодрайвер или USB: обновите их или отключайте по очереди в диспетчере устройств.", "Drivers took {:.1}% of CPU time (DPC {:.1}%, interrupts {:.1}%; normal is under 2%). This is what 'a driver slows the system down' looks like: crackling audio, jerky mouse, frame drops. Usually Wi-Fi/network, audio, graphics or USB drivers: update them or disable them one by one in Device Manager.", drv, self.dpc_pct, self.intr_pct));
+        }
+        if self.sample.disk_ms > 50.0 && self.sample.disk_active > 50.0 {
+            out.push(tf!("Диск отвечает медленно: {:.0} мс на запрос при загрузке {:.0}% (у SSD норма — единицы мс). Если это HDD, программы и игры с него будут грузиться долго; если SSD — проверьте его здоровье и свободное место.", "The disk responds slowly: {:.0} ms per request at {:.0}% busy (an SSD normally takes a few ms). On an HDD apps and games load slowly; on an SSD check its health and free space.", self.sample.disk_ms, self.sample.disk_active));
+        }
+        let total = self.sys.total_memory();
+        if total > 0 && self.sample.mem_free < total / 20 && self.sample.mem_standby > 1 << 30 {
+            out.push(tf!("Свободной памяти почти нет ({}), а кэш (standby) занимает {}. В играх это даёт рывки: включите «Очистить кэш памяти» на странице «Ускорение».", "Almost no free memory ({}) while the standby cache holds {}. In games this shows as stutter: use 'Clear memory cache' on the 'Speed' page.", crate::ui::fmt_mem(self.sample.mem_free), crate::ui::fmt_mem(self.sample.mem_standby)));
+        }
         if out.is_empty() {
             out.push(t!("Всё в порядке: ни один процесс не потребляет заметно больше обычного.", "All good: no process uses noticeably more than usual.").into());
         }
+        if self.cpu_times.is_some() && drv < 5.0 {
+            out.push(tf!("Драйверы в норме: DPC {:.1}%, прерывания {:.1}% времени ЦП.", "Drivers are fine: DPC {:.1}%, interrupts {:.1}% of CPU time.", self.dpc_pct, self.intr_pct));
+        }
+        if self.is_admin {
+            out.extend(boot_hint(crate::startup::boot_log()));
+        }
         out
+    }
+}
+
+/// Последние загрузки Windows и что их замедлило (журнал Diagnostics-Performance).
+pub fn boot_hint(log: &crate::startup::BootLog) -> Option<String> {
+    let s = |ms: u32| crate::model::dec(ms as f64 / 1000.0, 0);
+    let first = log.boots.first()?;
+    let times: Vec<String> = log.boots.iter().take(5).map(|b| s(b.1)).collect();
+    let mut t = tf!("Загрузка Windows: последняя {} с ({}), до рабочего стола {} с. Предыдущие: {} с.", "Windows boot: last {} s ({}), {} s to the desktop. Before that: {} s.", s(first.1), first.0, s(first.2), times[1..].join(", "));
+    if times.len() == 1 {
+        t = tf!("Загрузка Windows: {} с ({}), до рабочего стола {} с.", "Windows boot: {} s ({}), {} s to the desktop.", s(first.1), first.0, s(first.2));
+    }
+    let slow: Vec<String> = log.slow.iter().take(5).map(|x| format!("{} (+{} с)", if x.1.is_empty() { &x.0 } else { &x.1 }, crate::model::dec(x.2 as f64 / 1000.0, 1))).collect();
+    if !slow.is_empty() {
+        t += &tf!(" Больше всего замедляли: {}. Отключить можно на странице «Автозагрузка» (колонка «Замедляет загрузку»).", " The worst slowdowns: {}. Disable them on the 'Startup' page ('Slows boot by' column).", slow.join(", "));
+    }
+    Some(t)
+}
+
+#[cfg(test)]
+mod boot_tests {
+    #[test]
+    fn boot_hint_text() {
+        let mut log = crate::startup::BootLog::default();
+        assert_eq!(super::boot_hint(&log), None);
+        log.boots = vec![("2026-11-20 08:15".into(), 41_000, 15_000), ("2026-11-19 09:00".into(), 52_400, 18_000)];
+        log.slow = vec![("onedrive.exe".into(), "Microsoft OneDrive".into(), 2100)];
+        let h = super::boot_hint(&log).unwrap();
+        assert!(h.contains("последняя 41 с") && h.contains("Предыдущие: 52 с") && h.contains("Microsoft OneDrive (+2,1 с)"), "{h}");
     }
 }
 

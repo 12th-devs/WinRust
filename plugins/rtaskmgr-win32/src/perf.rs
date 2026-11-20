@@ -72,7 +72,6 @@ pub struct Sample {
     pub disk_active: f32, // %
     pub disk_read: f64,   // байт/с
     pub disk_write: f64,
-    #[cfg_attr(not(test), allow(dead_code))] // only the self-test prints it
     pub disk_ms: f32, // средний отклик, мс
     pub gpu_total: f32,
     pub gpu_types: HashMap<String, f32>, // загрузка по типам движков: 3D, Copy, VideoEncode, VideoDecode ...

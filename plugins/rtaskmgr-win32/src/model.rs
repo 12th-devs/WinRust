@@ -14,10 +14,11 @@ pub enum Page {
     Insights,
     Rules,
     Settings,
+    Boost,
 }
 
 /// Пункты боковой панели: страница, символ значка, подпись.
-pub static NAV: std::sync::LazyLock<[(Page, char, &'static str); 10]> = std::sync::LazyLock::new(|| [
+pub static NAV: std::sync::LazyLock<[(Page, char, &'static str); 11]> = std::sync::LazyLock::new(|| [
     (Page::Processes, '\u{E9D9}', t!("Процессы", "Processes")),
     (Page::Performance, '\u{E9D2}', t!("Производительность", "Performance")),
     (Page::History, '\u{E81C}', t!("Журнал приложений", "App history")),
@@ -28,6 +29,8 @@ pub static NAV: std::sync::LazyLock<[(Page, char, &'static str); 10]> = std::syn
     (Page::Insights, '\u{E946}', t!("Что тормозит", "What's slow")),
     (Page::Rules, '\u{E7BA}', t!("Правила", "Rules")),
     (Page::Settings, '\u{E713}', t!("Параметры", "Settings")),
+    // последней: настройки хранят номер открытой страницы, вставка в середину сдвинула бы его
+    (Page::Boost, '\u{E945}', t!("Ускорение", "Speed")),
 ]);
 
 pub fn page_title(p: Page) -> &'static str {
@@ -89,8 +92,9 @@ pub fn columns(p: Page) -> Vec<Col> {
         ],
         Page::Details => vec![col(t!("Имя", "Name"), 220.0, Left), col("PID", 70.0, Right), col(t!("Состояние", "Status"), 100.0, Left), col(t!("ЦП", "CPU"), 70.0, Right), col(t!("Память", "Memory"), 110.0, Right), col(t!("Диск", "Disk"), 100.0, Right), col(t!("Командная строка", "Command line"), 0.0, Left)],
         Page::Services => vec![col(t!("Имя", "Name"), 200.0, Left), col("PID", 70.0, Right), col(t!("Описание", "Description"), 360.0, Left), col(t!("Состояние", "Status"), 110.0, Left)],
-        Page::Startup => vec![col(t!("Имя", "Name"), 240.0, Left), col(t!("Издатель", "Publisher"), 200.0, Left), col(t!("Состояние", "Status"), 110.0, Left), col(t!("Команда", "Command"), 0.0, Left)],
+        Page::Startup => vec![col(t!("Имя", "Name"), 240.0, Left), col(t!("Издатель", "Publisher"), 180.0, Left), col(t!("Состояние", "Status"), 100.0, Left), col(t!("Замедляет загрузку", "Slows boot by"), 150.0, Right), col(t!("Команда", "Command"), 0.0, Left)],
         Page::History => vec![col(t!("Время", "Time"), 150.0, Left), col(t!("ЦП %", "CPU %"), 80.0, Right), col(t!("Память %", "Memory %"), 90.0, Right), col(t!("Ввод-вывод КБ/с", "I/O KB/s"), 130.0, Right), col(t!("Сеть КБ/с", "Network KB/s"), 110.0, Right), col(t!("Основной потребитель", "Top consumer"), 0.0, Left)],
+        Page::Boost => vec![col(t!("Что", "What"), 320.0, Left), col(t!("Состояние", "Status"), 220.0, Left), col(t!("Что делает", "What it does"), 0.0, Left)],
         Page::Rules => vec![col(t!("Процесс", "Process"), 220.0, Left), col(t!("Условие", "Condition"), 280.0, Left), col(t!("Действие", "Action"), 200.0, Left), col(t!("Сработало, раз", "Times triggered"), 130.0, Right)],
         _ => vec![],
     }
@@ -334,13 +338,42 @@ pub fn build_rows(d: &Data, c: &BuildCtx) -> Vec<Row> {
             .map(|s| {
                 let exe = exe_from_command(&s.command);
                 let company = exe.as_deref().and_then(|e| d.res.get(e)).map(|r| r.company).unwrap_or_default();
+                // без администратора журнал загрузки не читается: «нет данных», а не «не замедляет»
+                let impact = if d.is_admin { crate::startup::boot_impact(s, crate::startup::boot_log()) } else { None };
+                let impact_txt = match impact {
+                    Some(ms) => tf!("+{} с", "+{} s", dec(ms as f64 / 1000.0, 1)),
+                    None if d.is_admin => "—".into(),
+                    None => t!("нужен администратор", "administrator needed").into(),
+                };
                 Row {
                     key: s.key(),
                     icon_path: exe,
-                    cells: vec![s.name.clone(), company, (if s.enabled { t!("Включено", "Enabled") } else { t!("Отключено", "Disabled") }).into(), s.command.clone()],
-                    sortv: vec![f64::NAN; 4],
-                    heat: vec![None; 4],
+                    cells: vec![s.name.clone(), company, (if s.enabled { t!("Включено", "Enabled") } else { t!("Отключено", "Disabled") }).into(), impact_txt, s.command.clone()],
+                    sortv: vec![f64::NAN, f64::NAN, f64::NAN, impact.unwrap_or(0) as f64, f64::NAN],
+                    heat: vec![None; 5],
                     tip: tf!("Источник: {}.{}", "Source: {}.{}", s.source_label(), if s.needs_admin() && !d.is_admin { t!(" Для изменения нужны права администратора.", " Administrator rights are needed to change it.") } else { "" }),
+                    ..Default::default()
+                }
+            })
+            .collect(),
+        Page::Boost => crate::boost::ALL
+            .iter()
+            .map(|&id| {
+                use crate::boost::State;
+                let st = crate::boost::state(id, d.is_admin);
+                let text = match &st {
+                    State::On => t!("Включено", "On").to_string(),
+                    State::Off => t!("Выключено", "Off").to_string(),
+                    State::Busy => t!("Выполняется…", "Running…").to_string(),
+                    State::Info(s) => s.clone(),
+                    State::Unavailable(s) => tf!("Недоступно: {s}", "Unavailable: {s}"),
+                };
+                Row {
+                    key: id.key().into(),
+                    cells: vec![id.title().into(), text, id.desc().into()],
+                    sortv: vec![f64::NAN; 3],
+                    heat: vec![None; 3],
+                    tip: id.desc().into(),
                     ..Default::default()
                 }
             })
@@ -376,7 +409,7 @@ pub fn build_rows(d: &Data, c: &BuildCtx) -> Vec<Row> {
             .collect(),
         _ => vec![],
     };
-    if !matches!(c.page, Page::Processes | Page::Users) {
+    if !matches!(c.page, Page::Processes | Page::Users | Page::Boost) {
         let (ci, desc) = c.sort;
         rows.sort_by(|a, b| {
             let o = cmp_cells(a, b, ci);

@@ -2,6 +2,7 @@
 #[macro_use]
 extern crate winrust_common;
 mod app;
+mod boost;
 mod data;
 mod draw;
 mod gpu;
@@ -72,6 +73,14 @@ fn main() {
             return net_selftest(&out);
         }
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // установщик при удалении: вернуть всё, что включили на странице «Ускорение» (код выхода 1 = что-то не вернулось)
+    if args.first().is_some_and(|a| a == "--undo-speed") {
+        let errs = boost::undo_all();
+        for e in &errs {
+            eprintln!("{e}");
+        }
+        std::process::exit(!errs.is_empty() as i32);
+    }
     // повторный вызов с правами администратора из start_real_taskmgr: только открыть системный диспетчер
     if args.first().is_some_and(|a| a == "--real-taskmgr") {
         sys::start_real_taskmgr(&args[1..].join(" "), false);

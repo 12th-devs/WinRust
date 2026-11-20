@@ -21,6 +21,8 @@ pub enum Btn {
     StartEnable,
     StartDisable,
     RuleDelete,
+    BoostOn,
+    BoostOff,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -86,7 +88,7 @@ impl Ui {
         matches!(self.page, Page::Processes | Page::Users | Page::Details | Page::Services | Page::Startup | Page::History | Page::Rules)
     }
     pub fn has_table(&self) -> bool {
-        self.page_has_search()
+        self.page_has_search() || self.page == Page::Boost
     }
 }
 
@@ -108,6 +110,8 @@ pub enum Act {
     SvcStop,
     StartEnable,
     StartDisable,
+    BoostOn,
+    BoostOff,
     Export,
     SetTheme(u8),
     ToggleTray,
@@ -165,6 +169,7 @@ fn page_buttons(p: Page) -> Vec<(Btn, &'static str, char)> {
         Page::Startup => vec![(Btn::StartEnable, t!("Включить", "Enable"), '\u{E73E}'), (Btn::StartDisable, t!("Отключить", "Disable"), '\u{E711}'), (Btn::More, "", '\u{E712}')],
         Page::Rules => vec![(Btn::RuleDelete, t!("Удалить правило", "Delete rule"), '\u{E74D}'), (Btn::More, "", '\u{E712}')],
         Page::History => vec![(Btn::More, "", '\u{E712}')],
+        Page::Boost => vec![(Btn::BoostOn, t!("Включить", "Enable"), '\u{E73E}'), (Btn::BoostOff, t!("Выключить", "Disable"), '\u{E711}')],
         _ => vec![],
     }
 }
@@ -382,7 +387,7 @@ impl App {
         let has_sel = ui.sel.is_some();
         match b {
             Btn::RunTask | Btn::More => true,
-            Btn::EndTask | Btn::Efficiency | Btn::SvcStart | Btn::SvcStop | Btn::StartEnable | Btn::StartDisable | Btn::RuleDelete => {
+            Btn::EndTask | Btn::Efficiency | Btn::SvcStart | Btn::SvcStop | Btn::StartEnable | Btn::StartDisable | Btn::RuleDelete | Btn::BoostOn | Btn::BoostOff => {
                 let _ = d;
                 has_sel
             }
@@ -702,7 +707,8 @@ impl App {
             let ui = self.ui.borrow();
             self.data.borrow_mut().want_gpu_temp = ui.page == Page::Performance && matches!(ui.perf_sel, PerfKind::Gpu(_));
         }
-        let notes = self.data.borrow_mut().refresh();
+        let mut notes = self.data.borrow_mut().refresh();
+        notes.extend(crate::boost::take_done()); // фоновые действия страницы «Ускорение»
         if !notes.is_empty() {
             let msg = notes.join("; ");
             self.toast(&msg);
@@ -755,6 +761,8 @@ impl App {
             Btn::StartEnable => self.do_act(Act::StartEnable),
             Btn::StartDisable => self.do_act(Act::StartDisable),
             Btn::RuleDelete => self.do_act(Act::RuleDelete),
+            Btn::BoostOn => self.do_act(Act::BoostOn),
+            Btn::BoostOff => self.do_act(Act::BoostOff),
             Btn::More => {
                 let items = self.more_menu();
                 let r = self.ui.borrow().lay.as_ref().and_then(|l| l.buttons.iter().find(|x| x.1 == Btn::More).map(|x| x.0));
@@ -821,6 +829,7 @@ impl App {
             Page::Services => vec![MI::Item(t!("Запустить службу", "Start service"), Act::SvcStart), MI::Item(t!("Остановить службу", "Stop service"), Act::SvcStop)],
             Page::Startup => vec![MI::Item(t!("Включить", "Enable"), Act::StartEnable), MI::Item(t!("Отключить", "Disable"), Act::StartDisable), MI::Sep, MI::Item(t!("Открыть расположение файла", "Open file location"), Act::OpenDir)],
             Page::Rules => vec![MI::Item(t!("Удалить правило", "Delete rule"), Act::RuleDelete)],
+            Page::Boost => vec![MI::Item(t!("Включить", "Enable"), Act::BoostOn), MI::Item(t!("Выключить", "Disable"), Act::BoostOff)],
             _ => vec![],
         }
     }
@@ -959,6 +968,7 @@ impl App {
         match page {
             Page::Services => return self.act_service(&row, act),
             Page::Startup => return self.act_startup(&row, act),
+            Page::Boost => return self.act_boost(&row, act),
             Page::Rules => {
                 if act == Act::RuleDelete {
                     if let Ok(i) = row.key.parse::<usize>() {
@@ -1126,6 +1136,25 @@ impl App {
         self.data.borrow_mut().load_startup();
         self.rebuild();
         self.toast(&msg);
+    }
+
+    fn act_boost(&self, row: &Row, act: Act) {
+        let on = match act {
+            Act::BoostOn => true,
+            Act::BoostOff => false,
+            _ => return,
+        };
+        let Some(id) = crate::boost::Id::from_key(&row.key) else { return };
+        if on && id == crate::boost::Id::Defender && !self.confirm(t!("Defender перестанет проверять кэши сборки и библиотеки игр (cargo, npm, pip, Steam, Epic…). Вредоносный файл в этих папках не будет найден при открытии. Включить?", "Defender will stop scanning build caches and game libraries (cargo, npm, pip, Steam, Epic…). A malicious file in those folders will not be caught when opened. Enable?")) {
+            return;
+        }
+        // донор токена для программ, которые профиль запустит обратно: sihost.exe работает в каждом сеансе без повышения
+        let donors: Vec<u32> = self.data.borrow().procs.iter().filter(|p| p.name.eq_ignore_ascii_case("sihost.exe")).map(|p| p.pid).collect();
+        match crate::boost::start(id, on, donors) {
+            Ok(()) => self.toast(&tf!("{}: выполняется…", "{}: running…", id.title())),
+            Err(e) => self.toast(&format!("{}: {e}", id.title())),
+        }
+        self.rebuild();
     }
 
     fn confirm(&self, text: &str) -> bool {

@@ -20,12 +20,13 @@ pub(crate) fn tm_install() -> Result<(), String> {
     if let Some(old) = reg_str(TM_KEY, "Debugger").filter(|_| !tm_installed() && reg_str(TM_STATE, "Debugger").is_none()) {
         run("reg", &["add", TM_STATE, "/v", "Debugger", "/t", "REG_SZ", "/d", &old, "/f"])?;
     }
-    with_payload(&["Task manager.exe", "rs-du.exe"], |d| {
+    with_payload(&["Task manager.exe", "rs-du.exe", "debloat.exe"], |d| {
         let dst = tm_dir().join("rtaskmgr-win32.exe");
         let _ = run("taskkill", &["/f", "/im", "rtaskmgr-win32.exe"]); // an update: a running exe cannot be overwritten
         fs::create_dir_all(tm_dir()).map_err(|e| e.to_string())?;
         put(&d.join("Task manager.exe"), &dst)?;
         put(&d.join("rs-du.exe"), &tm_dir().join("rs-du.exe"))?;
+        put(&d.join("debloat.exe"), &tm_dir().join("debloat.exe"))?; // the Speed page's optional groups (updaters, Defender, NTFS, hosts)
         // the search (and the bar's Start panel) lists Start Menu shortcuts only, so without one the task manager is invisible to them
         soft(t!("ярлык в меню Пуск не создан, поиск не увидит диспетчер", "Start menu shortcut was not created, search will not find the task manager"), shortcut(&start_lnk("Task manager"), &dst, ""));
         // elevated start without a UAC prompt (the exe re-launches itself through this task), so it can end protected processes
@@ -36,6 +37,14 @@ pub(crate) fn tm_install() -> Result<(), String> {
 }
 
 pub(crate) fn tm_uninstall() -> Result<(), String> {
+    // first what the Speed page switched on (profile, shell blocks, debloat groups): it needs the exe and debloat.exe next to it.
+    // On failure everything stays, so uninstalling again retries.
+    let exe = tm_dir().join("rtaskmgr-win32.exe");
+    if exe.is_file() {
+        let _ = run("taskkill", &["/f", "/im", "rtaskmgr-win32.exe"]);
+        out(&exe.display().to_string(), &["--undo-speed"])?;
+    }
+    let _ = fs::remove_file(tm_dir().join("debloat.exe"));
     let _ = fs::remove_file(start_lnk("Task manager"));
     let _ = run("schtasks", &["/delete", "/tn", "rtaskmgr", "/f"]);
     // registry first: with the exe gone, taskmgr.exe would not start at all. Only our value: the key may hold
