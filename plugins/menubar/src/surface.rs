@@ -38,7 +38,8 @@ pub unsafe fn apply(hwnd: HWND, rounded: bool) {
         (&dark as *const i32).cast(),
         4,
     );
-    let material: i32 = if crate::CONFIG.with_borrow(|c| c.acrylic) {
+    // Context menus always use native Desktop Acrylic, independently of the bar.
+    let material: i32 = if rounded || crate::CONFIG.with_borrow(|c| c.acrylic) {
         3
     } else {
         2
@@ -56,7 +57,11 @@ pub unsafe fn apply(hwnd: HWND, rounded: bool) {
         (&corner as *const i32).cast(),
         4,
     );
-    let border = 0xffff_fffeu32; // DWMWA_COLOR_NONE
+    let border = if rounded {
+        0xffff_ffffu32
+    } else {
+        0xffff_fffeu32
+    }; // default menu outline / no bar outline
     DwmSetWindowAttribute(
         hwnd,
         DWMWA_BORDER_COLOR as u32,
@@ -111,8 +116,19 @@ pub unsafe fn apply(hwnd: HWND, rounded: bool) {
 }
 
 pub unsafe fn font(dpi: u32, bold: bool, icon: bool) -> HFONT {
+    sized_font(dpi, 13, bold, icon)
+}
+
+pub unsafe fn menu_font(dpi: u32) -> HFONT {
+    sized_font(dpi, 14, false, false)
+}
+pub unsafe fn control_icon_font(dpi: u32) -> HFONT {
+    sized_font(dpi, 22, false, true)
+}
+
+unsafe fn sized_font(dpi: u32, size: i32, bold: bool, icon: bool) -> HFONT {
     CreateFontW(
-        -(13 * dpi as i32 / 96),
+        -(size * dpi as i32 / 96),
         0,
         0,
         0,
@@ -175,8 +191,9 @@ pub unsafe fn draw_button(
     text: &str,
     font: HFONT,
     selected: bool,
-    is_menu: bool,
+    menu: Option<&crate::model::Item>,
 ) {
+    let is_menu = menu.is_some();
     let rect = draw.rcItem;
     let mut dc = null_mut();
     let params = BP_PAINTPARAMS {
@@ -189,20 +206,21 @@ pub unsafe fn draw_button(
     if buffer == 0 {
         return;
     }
+    BufferedPaintClear(buffer, &rect);
     let disabled = draw.itemState & ODS_DISABLED != 0;
     let contrast = high_contrast();
     if contrast {
         FillRect(dc, &rect, GetSysColorBrush(COLOR_WINDOW));
         BufferedPaintSetAlpha(buffer, &rect, 255);
     }
-    let hover = selected || draw.itemState & (ODS_SELECTED | ODS_FOCUS | ODS_HOTLIGHT) != 0;
+    let hover = selected
+        || draw.itemState & ODS_SELECTED != 0
+        || (!is_menu && draw.itemState & ODS_FOCUS != 0);
     if hover && !disabled {
         let color = if contrast {
             GetSysColor(COLOR_HIGHLIGHT)
-        } else if dark() {
-            0x00505050
         } else {
-            0x00dedede
+            0x00ffffff
         };
         let brush = CreateSolidBrush(color);
         let old = SelectObject(dc, brush);
@@ -219,16 +237,30 @@ pub unsafe fn draw_button(
         SelectObject(dc, pen);
         SelectObject(dc, old);
         DeleteObject(brush);
-        BufferedPaintSetAlpha(
-            buffer,
-            &RECT {
-                left: rect.left + 2,
-                top: rect.top + 2,
-                right: rect.right - 2,
-                bottom: rect.bottom - 2,
-            },
-            255,
-        );
+        if contrast {
+            BufferedPaintSetAlpha(buffer, &rect, 255);
+        } else {
+            // Premultiply the rounded mask so the white highlight remains translucent.
+            // Setting only alpha on GDI's full-white RGB would produce an opaque halo.
+            let mut bits = null_mut();
+            let mut stride = 0;
+            if GetBufferedPaintBits(buffer, &mut bits, &mut stride) >= 0 && !bits.is_null() {
+                let alpha = if dark() { 26 } else { 120 };
+                for y in 0..(rect.bottom - rect.top) {
+                    for x in 0..(rect.right - rect.left) {
+                        let pixel = &mut *bits.offset((y * stride + x) as isize);
+                        if pixel.rgbRed != 0 || pixel.rgbGreen != 0 || pixel.rgbBlue != 0 {
+                            *pixel = RGBQUAD {
+                                rgbRed: alpha,
+                                rgbGreen: alpha,
+                                rgbBlue: alpha,
+                                rgbReserved: alpha,
+                            };
+                        }
+                    }
+                }
+            }
+        }
     }
     let old = SelectObject(dc, font);
     if text == "windows" {
@@ -288,10 +320,16 @@ pub unsafe fn draw_button(
     };
     let mut area = rect;
     if is_menu {
-        area.left += 13;
-        area.right -= 13;
+        let dpi = windows_sys::Win32::UI::HiDpi::GetDpiForWindow(draw.hwndItem).max(96) as i32;
+        area.left += 34 * dpi / 96;
+        area.right -= 22 * dpi / 96;
     }
-    let value = wide(text);
+    let (title, shortcut) = if is_menu {
+        text.split_once('\t').unwrap_or((text, ""))
+    } else {
+        (text, "")
+    };
+    let value = wide(title);
     DrawThemeTextEx(
         theme,
         dc,
@@ -302,26 +340,187 @@ pub unsafe fn draw_button(
         DT_SINGLELINE
             | DT_VCENTER
             | DT_NOPREFIX
-            | if is_menu {
-                DT_LEFT | DT_EXPANDTABS
+            | DT_END_ELLIPSIS
+            | if is_menu || draw.CtlType == ODT_STATIC {
+                DT_LEFT
             } else {
                 DT_CENTER
             },
         &mut area,
         &options,
     );
-    if draw.itemState & ODS_FOCUS != 0 {
-        DrawFocusRect(
+    if !shortcut.is_empty() {
+        let value = wide(shortcut);
+        DrawThemeTextEx(
+            theme,
             dc,
-            &RECT {
-                left: rect.left + 3,
-                top: rect.top + 3,
-                right: rect.right - 3,
-                bottom: rect.bottom - 3,
-            },
+            0,
+            0,
+            value.as_ptr(),
+            -1,
+            DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT,
+            &mut area,
+            &options,
         );
+    }
+    if let Some(item) = menu {
+        let dpi = windows_sys::Win32::UI::HiDpi::GetDpiForWindow(draw.hwndItem).max(96);
+        let icon_font = font_for_menu_icon(dpi);
+        SelectObject(dc, icon_font);
+        let glyph = if item.checked {
+            Some("\u{E73E}")
+        } else {
+            menu_icon(item)
+        };
+        if let Some(glyph) = glyph {
+            let mut icon_area = RECT {
+                left: rect.left + 7 * dpi as i32 / 96,
+                right: rect.left + 27 * dpi as i32 / 96,
+                ..rect
+            };
+            let value = wide(glyph);
+            DrawThemeTextEx(
+                theme,
+                dc,
+                0,
+                0,
+                value.as_ptr(),
+                -1,
+                DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX,
+                &mut icon_area,
+                &options,
+            );
+        }
+        if !item.children.is_empty() {
+            let mut chevron = RECT {
+                left: rect.right - 22 * dpi as i32 / 96,
+                right: rect.right - 6 * dpi as i32 / 96,
+                ..rect
+            };
+            let value = wide("\u{E76C}");
+            DrawThemeTextEx(
+                theme,
+                dc,
+                0,
+                0,
+                value.as_ptr(),
+                -1,
+                DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX,
+                &mut chevron,
+                &options,
+            );
+        }
+        SelectObject(dc, font);
+        DeleteObject(icon_font);
     }
     CloseThemeData(theme);
     SelectObject(dc, old);
     EndBufferedPaint(buffer, 1);
+}
+
+unsafe fn font_for_menu_icon(dpi: u32) -> HFONT {
+    sized_font(dpi, 14, false, true)
+}
+
+/// Paint over the native trackbar class without replacing its input/UIA provider.
+pub unsafe fn paint_slider(hwnd: HWND) {
+    let mut paint = zeroed();
+    let dc = BeginPaint(hwnd, &mut paint);
+    let mut rect = zeroed();
+    GetClientRect(hwnd, &mut rect);
+    let draw = NMCUSTOMDRAW {
+        hdc: dc,
+        rc: rect,
+        ..zeroed()
+    };
+    draw_slider(
+        &draw,
+        SendMessageW(hwnd, WM_USER, 0, 0) as i32,
+        GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_DISABLED as isize == 0,
+    );
+    EndPaint(hwnd, &paint);
+}
+
+unsafe fn draw_slider(draw: &NMCUSTOMDRAW, level: i32, enabled: bool) {
+    let mut dc = null_mut();
+    let rect = draw.rc;
+    let params = BP_PAINTPARAMS {
+        cbSize: size_of::<BP_PAINTPARAMS>() as u32,
+        dwFlags: BPPF_ERASE,
+        prcExclude: null(),
+        pBlendFunction: null(),
+    };
+    let buffer = BeginBufferedPaint(draw.hdc, &rect, BPBF_TOPDOWNDIB, &params, &mut dc);
+    if buffer == 0 {
+        return;
+    }
+    BufferedPaintClear(buffer, &rect);
+    let scale = ((rect.bottom - rect.top) / 30).max(1);
+    let y = (rect.top + rect.bottom) / 2;
+    let left = rect.left + 9 * scale;
+    let right = rect.right - 9 * scale;
+    let x = left + (right - left) * level.clamp(0, 100) / 100;
+    let pen = SelectObject(dc, GetStockObject(NULL_PEN));
+    let remaining = CreateSolidBrush(0x00383838);
+    let active = CreateSolidBrush(if enabled { 0x00ffffff } else { 0x00606060 });
+    let old = SelectObject(dc, remaining);
+    RoundRect(
+        dc,
+        left,
+        y - 2 * scale,
+        right,
+        y + 2 * scale,
+        4 * scale,
+        4 * scale,
+    );
+    SelectObject(dc, active);
+    RoundRect(
+        dc,
+        left,
+        y - 2 * scale,
+        x,
+        y + 2 * scale,
+        4 * scale,
+        4 * scale,
+    );
+    Ellipse(
+        dc,
+        x - 7 * scale,
+        y - 7 * scale,
+        x + 7 * scale,
+        y + 7 * scale,
+    );
+    SelectObject(dc, old);
+    SelectObject(dc, pen);
+    DeleteObject(remaining);
+    DeleteObject(active);
+    let mut bits = null_mut();
+    let mut stride = 0;
+    if GetBufferedPaintBits(buffer, &mut bits, &mut stride) >= 0 && !bits.is_null() {
+        for y in 0..rect.bottom - rect.top {
+            for x in 0..rect.right - rect.left {
+                let pixel = &mut *bits.offset((y * stride + x) as isize);
+                pixel.rgbReserved = pixel.rgbRed;
+            }
+        }
+    }
+    EndBufferedPaint(buffer, 1);
+}
+
+fn menu_icon(item: &crate::model::Item) -> Option<&'static str> {
+    use crate::model::Action;
+    match &item.action {
+        Action::Uri("ms-settings:about") => Some("\u{E946}"),
+        Action::Uri("ms-settings:") => Some("\u{E713}"),
+        Action::Uri("ms-windows-store:") => Some("\u{E719}"),
+        Action::Uri(uri) if uri.contains("wifi") || uri.contains("network") => Some("\u{E701}"),
+        Action::Uri(uri) if uri.contains("bluetooth") => Some("\u{E702}"),
+        Action::Uri(uri) if uri.contains("sound") => Some("\u{E767}"),
+        Action::Uri(uri) if uri.contains("display") => Some("\u{E7F4}"),
+        Action::Lock => Some("\u{E72E}"),
+        Action::Exit => Some("\u{E8BB}"),
+        Action::Volume(_) | Action::VolumeSet(_) | Action::Mute => Some("\u{E767}"),
+        _ if item.label == "Menu Bar Settings" => Some("\u{E713}"),
+        _ => None,
+    }
 }

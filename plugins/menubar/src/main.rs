@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 #![allow(unsafe_op_in_unsafe_fn)]
 mod config;
+mod control;
 mod model;
 mod platform;
 mod surface;
@@ -57,6 +58,8 @@ struct Status {
     bluetooth: String,
     battery: Option<(u8, bool)>,
     volume: Option<(i32, bool)>,
+    media: platform::Media,
+    brightness: Option<(isize, i32)>,
 }
 struct Update {
     snapshot: Snapshot,
@@ -67,6 +70,7 @@ enum Work {
     Menu(isize, usize),
     Action(Action, isize),
     Status,
+    Control(isize),
 }
 struct Trigger {
     label: String,
@@ -158,9 +162,20 @@ fn start_worker() {
         let _subscriptions = platform::Subscriptions::new();
         let mut target = unsafe { GetForegroundWindow() as isize };
         let mut status = Status::default();
+        let mut control_monitor = 0;
         let mut last_status = std::time::Instant::now() - Duration::from_secs(60);
+        let mut pending = None;
         loop {
-            let work = receiver.recv_timeout(Duration::from_secs(30));
+            let work = pending.take().map_or_else(
+                || {
+                    receiver.recv_timeout(Duration::from_secs(if control_monitor == 0 {
+                        30
+                    } else {
+                        3
+                    }))
+                },
+                Ok,
+            );
             match work {
                 Ok(Work::Refresh(next)) => {
                     if next != 0 {
@@ -171,15 +186,58 @@ fn start_worker() {
                     target = next;
                     platform::initialize_menu(target, index);
                 }
-                Ok(Work::Action(action, next)) => {
+                Ok(Work::Action(mut action, next)) => {
+                    // Slider positions supersede older pending positions; discrete actions
+                    // retain FIFO order and are never dropped during a drag.
+                    if matches!(action, Action::VolumeSet(_) | Action::BrightnessSet(_, _)) {
+                        while let Ok(work) = receiver.try_recv() {
+                            match work {
+                                Work::Action(new, _)
+                                    if matches!(
+                                        (&action, &new),
+                                        (Action::VolumeSet(_), Action::VolumeSet(_))
+                                    ) || matches!((&action, &new), (Action::BrightnessSet(a, _), Action::BrightnessSet(b, _)) if a == b) =>
+                                {
+                                    action = new
+                                }
+                                Work::Status => {}
+                                other => {
+                                    pending = Some(other);
+                                    break;
+                                }
+                            }
+                        }
+                    }
                     platform::execute(&action, next);
-                    last_status = std::time::Instant::now() - Duration::from_secs(60);
+                    match action {
+                        Action::Volume(_) | Action::VolumeSet(_) | Action::Mute => {
+                            status.volume = platform::volume(None, false)
+                        }
+                        Action::BrightnessSet(monitor, _) => {
+                            status.brightness =
+                                platform::brightness(monitor, None).map(|v| (monitor, v))
+                        }
+                        Action::Media(_) => status.media = platform::media(None),
+                        Action::Radio(_) | Action::None => {
+                            last_status = std::time::Instant::now() - Duration::from_secs(60)
+                        }
+                        _ => {}
+                    }
                 }
                 Ok(Work::Status) => {
+                    status.volume = platform::volume(None, false);
+                    status.wifi = platform::wifi();
+                }
+                Ok(Work::Control(monitor)) => {
+                    control_monitor = monitor;
                     last_status = std::time::Instant::now() - Duration::from_secs(60);
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-                Err(_) => {}
+                Err(_) => {
+                    if control_monitor != 0 {
+                        status.media = platform::media(None);
+                    }
+                }
             }
             if last_status.elapsed() >= Duration::from_secs(30) {
                 status = Status {
@@ -187,6 +245,16 @@ fn start_worker() {
                     bluetooth: platform::bluetooth(),
                     battery: platform::battery(),
                     volume: platform::volume(None, false),
+                    media: if control_monitor != 0 {
+                        platform::media(None)
+                    } else {
+                        platform::Media::default()
+                    },
+                    brightness: if control_monitor != 0 {
+                        platform::brightness(control_monitor, None).map(|v| (control_monitor, v))
+                    } else {
+                        None
+                    },
                 };
                 last_status = std::time::Instant::now();
             }
@@ -212,6 +280,7 @@ fn system_items() -> Vec<Item> {
     vec![
         Item::new("About this PC", Action::Uri("ms-settings:about")),
         Item::new("System Settings…", Action::Uri("ms-settings:")),
+        Item::new("Notifications", Action::Keys(vec![VK_LWIN, b'N' as u16])),
         Item::new("Microsoft Store", Action::Uri("ms-windows-store:")),
         Item::separator(),
         Item::new(
@@ -412,14 +481,13 @@ unsafe fn layout(hwnd: HWND) {
         system_items(),
         Action::None,
     )];
-    let mut application = trigger(
+    let application = trigger(
         &snapshot.name,
         &format!("{} application menu", snapshot.name),
         false,
         window_items(),
         Action::None,
     );
-    application.bold = true;
     left.push(application);
     for (index, menu) in snapshot.menus.iter().enumerate() {
         let mut t = trigger(
@@ -510,16 +578,16 @@ unsafe fn layout(hwnd: HWND) {
         "\u{E713}",
         "Control Center",
         true,
-        control_items(),
-        Action::None,
+        vec![],
+        Action::ControlCenter,
     ));
     let clock = platform::clock(config.seconds);
     right.push(trigger(
         &clock,
-        &format!("{clock}, open Notification Center"),
+        &format!("{clock}, open Control Center"),
         false,
         vec![],
-        Action::Keys(vec![VK_LWIN, b'N' as u16]),
+        Action::ControlCenter,
     ));
     state.clock = clock;
     let width = state.rect.right - state.rect.left;
@@ -676,6 +744,7 @@ unsafe fn close_panels(from: usize) {
         DestroyWindow(hwnd);
     }
     if from == 0 {
+        control::close();
         OPEN.set(None);
         if DIRTY.replace(false) {
             PostMessageW(state_host(), WM_APP + 8, 0, 0);
@@ -696,7 +765,7 @@ unsafe fn open_panel(owner: HWND, items: Vec<Item>, anchor: RECT, depth: usize, 
         return;
     }
     let dpi = GetDpiForWindow(owner).max(96);
-    let font = surface::font(dpi, false, false);
+    let font = surface::menu_font(dpi);
     let width = items
         .iter()
         .map(|item| surface::measure(owner, &item.label.replace('\t', "    "), font) + sc(64, dpi))
@@ -710,9 +779,9 @@ unsafe fn open_panel(owner: HWND, items: Vec<Item>, anchor: RECT, depth: usize, 
                 if item.label.is_empty() {
                     9
                 } else if matches!(item.action, Action::VolumeSet(_)) {
-                    60
+                    64
                 } else {
-                    28
+                    32
                 },
                 dpi,
             )
@@ -814,7 +883,7 @@ unsafe fn open_panel(owner: HWND, items: Vec<Item>, anchor: RECT, depth: usize, 
             sc(5, dpi),
             top,
             width - sc(10, dpi),
-            sc(28, dpi),
+            sc(32, dpi),
             hwnd,
             (index + 100) as HMENU,
             GetModuleHandleW(null()),
@@ -825,7 +894,7 @@ unsafe fn open_panel(owner: HWND, items: Vec<Item>, anchor: RECT, depth: usize, 
         }
         SetWindowSubclass(button, Some(button_proc), 1, 0);
         state.buttons.push(button);
-        top += sc(28, dpi);
+        top += sc(32, dpi);
         if let Action::VolumeSet(level) = item.action {
             let slider = CreateWindowExW(
                 0,
@@ -881,6 +950,15 @@ unsafe fn open_trigger(hwnd: HWND, index: usize, keyboard: bool) {
     let app_index = item.app_index;
     let mut rect = zeroed();
     GetWindowRect(state.buttons[index], &mut rect);
+    if action == Action::ControlCenter {
+        if control::is_open() {
+            control::close();
+        } else {
+            close_panels(0);
+            control::open(hwnd, rect);
+        }
+        return;
+    }
     if items.is_empty() {
         close_panels(0);
         request(Work::Action(action, target));
@@ -969,6 +1047,11 @@ unsafe extern "system" fn button_proc(
 ) -> LRESULT {
     let parent = GetParent(hwnd);
     match msg {
+        WM_ERASEBKGND if data != 0 && !surface::high_contrast() => return 1,
+        WM_PAINT if data != 0 && !surface::high_contrast() => {
+            surface::paint_slider(hwnd);
+            return 0;
+        }
         WM_GETDLGCODE if data == 0 => return DLGC_WANTALLKEYS as isize,
         WM_KEYDOWN if data == 0 || matches!(wp as u16, VK_ESCAPE | VK_TAB) => {
             SendMessageW(parent, KEY, wp, GetDlgCtrlID(hwnd) as isize);
@@ -1193,9 +1276,9 @@ unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
                 } else {
                     y += sc(
                         if matches!(item.action, Action::VolumeSet(_)) {
-                            60
+                            64
                         } else {
-                            28
+                            32
                         },
                         s.dpi,
                     );
@@ -1209,17 +1292,15 @@ unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
             let state = panel(hwnd);
             let index = draw.CtlID.saturating_sub(100) as usize;
             if let Some(item) = state.items.get(index) {
-                let label = format!(
-                    "{}{}{}",
-                    if item.checked { "✓  " } else { "    " },
-                    item.label,
-                    if item.children.is_empty() {
-                        ""
-                    } else {
-                        "    ›"
-                    }
+                surface::draw_button(
+                    draw,
+                    &item.label,
+                    state.font,
+                    state
+                        .hover
+                        .map_or(draw.itemState & ODS_FOCUS != 0, |hover| hover == index),
+                    Some(item),
                 );
-                surface::draw_button(draw, &label, state.font, state.hover == Some(index), true);
             }
             1
         }
@@ -1247,8 +1328,8 @@ unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
         WM_VSCROLL => {
             let state = panel(hwnd);
             let delta = match (wp & 0xffff) as i32 {
-                SB_LINEUP => -sc(28, state.dpi),
-                SB_LINEDOWN => sc(28, state.dpi),
+                SB_LINEUP => -sc(32, state.dpi),
+                SB_LINEDOWN => sc(32, state.dpi),
                 SB_PAGEUP => -sc(224, state.dpi),
                 SB_PAGEDOWN => sc(224, state.dpi),
                 SB_THUMBTRACK | SB_THUMBPOSITION => (wp >> 16) as i32 - state.offset,
@@ -1258,6 +1339,10 @@ unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
             0
         }
         KEY => {
+            let state = panel(hwnd);
+            if let Some(old) = state.hover.take() {
+                InvalidateRect(state.buttons[old], null(), 0);
+            }
             navigate_panel(hwnd, wp as u16, (lp as usize).saturating_sub(100));
             0
         }
@@ -1351,7 +1436,7 @@ unsafe extern "system" fn bar_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                         0
                     }],
                     state.hover == index as i32 || OPEN.get() == Some((hwnd, index)),
-                    false,
+                    None,
                 );
             }
             1
@@ -1469,7 +1554,7 @@ unsafe extern "system" fn bar_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                 SNAPSHOT.with_borrow_mut(|s| *s = update.snapshot);
                 STATUS.with_borrow_mut(|s| *s = update.status);
                 // Preserve live popup HWNDs while status values change. Rebuild only closed bars.
-                if changed || status_changed && OPEN.get().is_none() {
+                if changed || status_changed && OPEN.get().is_none() && !control::is_open() {
                     if changed {
                         close_panels(0);
                     }
@@ -1485,6 +1570,7 @@ unsafe extern "system" fn bar_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                     DIRTY.set(true);
                     refresh_controls();
                 }
+                control::refresh();
             }
             0
         }
@@ -1495,7 +1581,7 @@ unsafe extern "system" fn bar_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
             if state.clock != clock {
                 state.clock = clock.clone();
                 if let Some(index) = state.triggers.len().checked_sub(1) {
-                    state.triggers[index].accessible = format!("{clock}, open Notification Center");
+                    state.triggers[index].accessible = format!("{clock}, open Control Center");
                     SetWindowTextW(
                         state.buttons[index],
                         wide(&state.triggers[index].accessible).as_ptr(),
@@ -1514,6 +1600,7 @@ unsafe extern "system" fn bar_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
             let should_hide = (config.auto_hide || fullscreen)
                 && !over
                 && OPEN.get().is_none()
+                && !control::is_open()
                 && GetForegroundWindow() != hwnd;
             if should_hide != state.hidden {
                 state.hidden = should_hide;

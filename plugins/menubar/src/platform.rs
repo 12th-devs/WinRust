@@ -392,6 +392,117 @@ pub fn set_volume(level: i32) {
     }
 }
 
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct Media {
+    pub title: String,
+    pub artist: String,
+    pub playing: bool,
+    pub available: bool,
+}
+
+pub fn media(command: Option<u8>) -> Media {
+    use windows::Media::Control::{
+        GlobalSystemMediaTransportControlsSessionManager as Manager,
+        GlobalSystemMediaTransportControlsSessionPlaybackStatus as Playback,
+    };
+    let result = (|| -> windows::core::Result<Media> {
+        let manager = Manager::RequestAsync()?.join()?;
+        let session = manager.GetCurrentSession()?;
+        if let Some(command) = command {
+            match command {
+                0 => {
+                    session.TrySkipPreviousAsync()?.join()?;
+                }
+                1 => {
+                    session.TryTogglePlayPauseAsync()?.join()?;
+                }
+                _ => {
+                    session.TrySkipNextAsync()?.join()?;
+                }
+            }
+        }
+        let properties = session.TryGetMediaPropertiesAsync()?.join()?;
+        Ok(Media {
+            title: properties.Title()?.to_string(),
+            artist: properties.Artist()?.to_string(),
+            playing: session.GetPlaybackInfo()?.PlaybackStatus()? == Playback::Playing,
+            available: true,
+        })
+    })();
+    result.unwrap_or_default()
+}
+
+pub fn brightness(monitor: isize, set: Option<i32>) -> Option<i32> {
+    use windows_sys::Win32::Devices::Display::*;
+    unsafe {
+        let mut count = 0;
+        if monitor == 0
+            || GetNumberOfPhysicalMonitorsFromHMONITOR(monitor as _, &mut count) == 0
+            || count == 0
+            || count > 32
+        {
+            return None;
+        }
+        let mut monitors = vec![PHYSICAL_MONITOR::default(); count as usize];
+        if GetPhysicalMonitorsFromHMONITOR(monitor as _, count, monitors.as_mut_ptr()) == 0 {
+            return None;
+        }
+        let mut value = None;
+        for monitor in &monitors {
+            let (mut min, mut current, mut max) = (0, 0, 0);
+            if GetMonitorBrightness(monitor.hPhysicalMonitor, &mut min, &mut current, &mut max) != 0
+                && max > min
+            {
+                if let Some(level) = set {
+                    let requested = min + (max - min) * level.clamp(0, 100) as u32 / 100;
+                    if SetMonitorBrightness(monitor.hPhysicalMonitor, requested) != 0 {
+                        current = requested;
+                    }
+                }
+                value = Some(((current.saturating_sub(min)) * 100 / (max - min)) as i32);
+                break;
+            }
+        }
+        DestroyPhysicalMonitors(count, monitors.as_ptr());
+        value
+    }
+}
+
+fn toggle_radio(kind: &str) {
+    use windows::Devices::Radios::{Radio, RadioKind, RadioState};
+    let result = (|| -> windows::core::Result<bool> {
+        let radios = Radio::GetRadiosAsync()?.join()?;
+        for radio in radios {
+            if radio.Kind()?
+                == if kind == "wifi" {
+                    RadioKind::WiFi
+                } else {
+                    RadioKind::Bluetooth
+                }
+            {
+                let state = if radio.State()? == RadioState::On {
+                    RadioState::Off
+                } else {
+                    RadioState::On
+                };
+                return Ok(radio.SetStateAsync(state)?.join()?
+                    == windows::Devices::Radios::RadioAccessStatus::Allowed);
+            }
+        }
+        Ok(false)
+    })();
+    if result != Ok(true) {
+        execute(
+            &Action::Uri(if kind == "wifi" {
+                "ms-settings:network-wifi"
+            } else {
+                "ms-settings:bluetooth"
+            }),
+            0,
+        );
+    }
+}
+
 pub fn execute(action: &Action, target: isize) {
     unsafe {
         match action {
@@ -451,6 +562,13 @@ pub fn execute(action: &Action, target: isize) {
                 volume(Some(*delta), false);
             }
             Action::VolumeSet(level) => set_volume(*level),
+            Action::BrightnessSet(monitor, level) => {
+                brightness(*monitor, Some(*level));
+            }
+            Action::Radio(kind) => toggle_radio(kind),
+            Action::Media(command) => {
+                media(Some(*command));
+            }
             Action::Mute => {
                 volume(None, true);
             }
