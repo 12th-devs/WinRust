@@ -1,6 +1,23 @@
 //! wiztree, photoview, rust-settings, debloat, purge: small stand-alone tools, one exe each in its own Program Files folder.
 use crate::*;
 
+pub(crate) fn menu_dir() -> PathBuf {
+    program_files().join("WinRust Menu Bar")
+}
+
+pub(crate) fn menu_install() -> Result<(), String> {
+    tool_install("menubar.exe", &menu_dir(), Some("WinRust Menu Bar"))
+}
+
+pub(crate) fn menu_uninstall() -> Result<(), String> {
+    // Ask the live app to unregister its appbars before the generic removal helper.
+    let exe = menu_dir().join("menubar.exe");
+    let _ = run(&exe.to_string_lossy(), &["--quit"]);
+    std::thread::sleep(std::time::Duration::from_millis(350));
+    tool_remove("menubar.exe", &menu_dir(), Some("WinRust Menu Bar"));
+    Ok(())
+}
+
 // ---------- wiztree, photoview, debloat: small stand-alone tools, one exe each in its own Program Files folder ----------
 
 pub(crate) fn wz_dir() -> PathBuf {

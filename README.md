@@ -34,6 +34,8 @@ On uninstall, `rust-explorer` restores the service startup values and the svchos
 
 ## What gets installed
 
+This fork also includes **[menubar](plugins/menubar/README.md)**, an opt-in Rust top menu bar with native Mica/Acrylic, foreground application menus, system controls, and a locale-aware clock. It is its own module and coexists with the Windows taskbar or WinRust bottom bar. Build with `cargo build -p menubar --release`, then run `target\release\menubar.exe`; the full installer offers it separately.
+
 | Plugin | What you get | What it changes in Windows |
 |---|---|---|
 | **rust-search** | File search over all NTFS drives, Alt+Space | Disables the Windows Search service, blocks SearchHost.exe, hides the taskbar search box |

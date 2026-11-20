@@ -26,6 +26,7 @@ members = [
     "common",
     "ReShell",
     "plugins/topbar",
+    "plugins/menubar",
     "plugins/rtaskmgr-win32",
     "plugins/rs-du",
     "plugins/rust-explorer",

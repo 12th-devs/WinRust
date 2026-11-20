@@ -78,6 +78,16 @@ struct Plugin {
 }
 const PLUGINS: &[Plugin] = &[
     Plugin {
+        name: "menubar",
+        desc: Tr("Верхняя строка меню на Rust с Mica, меню активного приложения и системными элементами. Отдельный модуль.", "A separate Mica top menu bar: active application menus, system controls and clock. Works alongside the Windows taskbar or WinRust bottom bar."),
+        warn: Tr("Добавляет отдельную верхнюю строку меню. Панель задач и оболочка не заменяются.", "Adds a separate top menu bar and a Start menu shortcut. Does not replace the taskbar or Explorer. Launch WinRust Menu Bar from Start; enable startup separately if wanted."),
+        installed: || menu_dir().join("menubar.exe").is_file(),
+        actions: Some((menu_install, menu_uninstall)),
+        settings: false,
+        bulk: true,
+        glyph: "\u{E700}",
+    },
+    Plugin {
         name: "rust-search",
         desc: Tr("Быстрый поиск файлов по NTFS (Alt+Space). Заменяет поиск Windows: служба WSearch отключается, SearchHost блокируется.", "Fast NTFS file search (Alt+Space). Replaces Windows Search: the WSearch service is disabled and SearchHost is blocked."),
         warn: Tr("Служба поиска Windows (WSearch) будет ОТКЛЮЧЕНА, SearchHost.exe заблокирован, строка поиска на панели задач скрыта: поиск в Пуске, Проводнике и Outlook перестанет работать.", "The Windows Search service (WSearch) will be DISABLED, SearchHost.exe blocked and the taskbar search box hidden: search in Start, Explorer and Outlook will stop working."),
