@@ -145,3 +145,7 @@ Several plugins in one command are installed in the table's order (topbar before
 2. A line in `payload.txt`.
 3. `src/install/<name>.rs` with an install/uninstall pair (and a `mod` line in `src/install/mod.rs`). Save the original values before changing anything, so uninstall can put them back.
 4. An entry in `PLUGINS` (`src/main.rs`). The window, its height and the command line pick it up on their own.
+
+## License
+
+Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE) at your option.
