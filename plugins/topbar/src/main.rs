@@ -2315,6 +2315,54 @@ unsafe fn style_menu() {
     });
 }
 
+/// Right click on Start: the Win+X menu (Explorer's own is gone with the bar).
+unsafe fn start_menu() {
+    let bar = BAR.load(Relaxed) as HWND;
+    // (label, target); "!" targets are actions of ours, the rest goes through `open`
+    let tools: [(&str, &str, &str); 14] = [
+        ("Приложения и возможности", "Apps and Features", "ms-settings:appsfeatures"),
+        ("Электропитание", "Power Options", "powercfg.cpl"),
+        ("Просмотр событий", "Event Viewer", "eventvwr.msc"),
+        ("Система", "System", "ms-settings:about"),
+        ("Диспетчер устройств", "Device Manager", "devmgmt.msc"),
+        ("Сетевые подключения", "Network Connections", "ms-settings:network"),
+        ("Управление дисками", "Disk Management", "diskmgmt.msc"),
+        ("Управление компьютером", "Computer Management", "compmgmt.msc"),
+        ("Терминал", "Terminal", "!term"),
+        ("Диспетчер задач", "Task Manager", "taskmgr.exe"),
+        ("Параметры", "Settings", "ms-settings:"),
+        ("Проводник", "File Explorer", "shell:MyComputerFolder"),
+        ("Выполнить", "Run", "!run"),
+        ("Рабочий стол", "Desktop", "!desktop"),
+    ];
+    let power = [("Блокировка", "Lock", "!lock"), ("Сон", "Sleep", "!sleep"), ("Перезагрузка", "Restart", "!restart"), ("Завершение работы", "Shut down", "!shutdown")];
+    let mut items = Vec::new();
+    let mut targets = Vec::new();
+    for (i, (ru, en, to)) in tools.iter().chain(power.iter()).enumerate() {
+        let it = fly::MItem::new(t!(*ru, *en));
+        items.push(if i == tools.len() { it.sep() } else { it });
+        targets.push(*to);
+    }
+    let head = (null_mut(), "\u{E700}", t!("Пуск", "Start").to_string(), String::new());
+    fly::menu(tip_cx(&bar_layout(bar), 0), Some(head), items, move |i| {
+        let Some(&to) = targets.get(i) else { return };
+        let quiet = |c: &mut Command| { let _ = c.creation_flags(NO_WINDOW).spawn(); };
+        match to {
+            "!term" => {
+                let wt = std::env::var_os("LOCALAPPDATA").map(|b| PathBuf::from(b).join(r"Microsoft\WindowsApps\wt.exe")).filter(|p| p.is_file());
+                open(&wide(if wt.is_some() { "wt.exe" } else { "powershell.exe" }));
+            }
+            "!run" => quiet(Command::new("rundll32.exe").args(["shell32.dll,#61"])),
+            "!desktop" => winrust_common::desktop::toggle(),
+            "!lock" => quiet(Command::new("rundll32.exe").args(["user32.dll,LockWorkStation"])),
+            "!sleep" => fly::sleep_now(),
+            "!restart" => quiet(Command::new("shutdown").args(["/r", "/t", "0"])),
+            "!shutdown" => quiet(Command::new("shutdown").args(["/s", "/t", "0"])),
+            _ => open(&wide(to)),
+        }
+    });
+}
+
 /// Puts the open, not minimized windows side by side in the work area.
 unsafe fn tile_windows() {
     let wins: Vec<HWND> = BTNS.with_borrow(|b| b.iter().flat_map(|b| b.wins.iter().copied()).filter(|&w| IsIconic(w) == 0).collect());
@@ -2363,11 +2411,8 @@ unsafe fn click(h: i32, left: bool, mid: bool) {
                 ti.into_iter().for_each(|ti| tray_click(ti, left));
             }
         }
-        0 => {
-            if left {
-                fly::toggle(fly::Kind::Start);
-            }
-        }
+        0 if left => fly::toggle(fly::Kind::Start),
+        0 => start_menu(),
         1.. => {
             let (wins, lnk) = BTNS.with_borrow(|b| b.get(h as usize).map(|b| (b.wins.clone(), b.pin.and_then(|p| PINS.with_borrow(|p2| p2.get(p).map(|x| x.lnk.clone()))))).unwrap_or_default());
             match (wins.first(), left) {

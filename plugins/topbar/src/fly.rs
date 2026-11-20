@@ -1141,7 +1141,7 @@ unsafe fn run_act(a: Act, rect: RECT, x: i32) {
 }
 
 /// Sleep (S3 / modern standby), never hibernate. SetSuspendState needs the shutdown privilege switched on in our token.
-fn sleep_now() {
+pub fn sleep_now() {
     use windows_sys::Win32::{
         Security::{AdjustTokenPrivileges, LookupPrivilegeValueW, SE_PRIVILEGE_ENABLED, TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES},
         System::{Power::SetSuspendState, Threading::{GetCurrentProcess, OpenProcessToken}},

@@ -648,8 +648,17 @@ mod sh {
                 return Ok(Some(id as u32));
             }
             if id > 0 {
-                let ci = CMINVOKECOMMANDINFO { cbSize: size_of::<CMINVOKECOMMANDINFO>() as u32, hwnd, lpVerb: PCSTR((id - 1) as usize as *const u8), nShow: SW_SHOWNORMAL.0, ..Default::default() };
-                cm.InvokeCommand(&ci)?;
+                // ptInvoke: without it dialogs the shell opens ("Open with" > choose another app) land off screen
+                let ci = CMINVOKECOMMANDINFOEX {
+                    cbSize: size_of::<CMINVOKECOMMANDINFOEX>() as u32,
+                    fMask: CMIC_MASK_PTINVOKE,
+                    hwnd,
+                    lpVerb: PCSTR((id - 1) as usize as *const u8),
+                    nShow: SW_SHOWNORMAL.0,
+                    ptInvoke: pt,
+                    ..Default::default()
+                };
+                cm.InvokeCommand(&ci as *const _ as *const CMINVOKECOMMANDINFO)?;
             }
             DestroyMenu(menu)?;
             Ok(None)
