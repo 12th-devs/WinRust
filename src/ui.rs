@@ -114,6 +114,7 @@ pub(crate) const ID_CANCEL: usize = 3;
 pub(crate) const ID_SWITCH: usize = 4;
 pub(crate) const ID_GEAR: usize = 5;
 pub(crate) const ID_LANG: usize = 6; // EN / RU switch
+pub(crate) const ID_SHELL: usize = 7; // settings panel: replace Explorer with rust-explorer
 pub(crate) const ID_CHECK: usize = 100; // + plugin index: the row's checkbox
 pub(crate) const STARTING: usize = usize::MAX - 1; // JOB before install_all picks its first component
 
@@ -154,6 +155,17 @@ pub(crate) fn main_box(w: f32) -> Box4 {
 pub(crate) fn switch_box(w: f32) -> Box4 {
     let (d, _, _) = dialog_boxes(w);
     [d[2] - 24.0 - 16.0 - 44.0, d[1] + 78.0 + 23.0, d[2] - 24.0 - 16.0, d[1] + 78.0 + 47.0]
+}
+
+/// Second switch row of the settings panel: which shell to install.
+pub(crate) fn shell_switch_box(w: f32) -> Box4 {
+    let b = switch_box(w);
+    [b[0], b[1] + 80.0, b[2], b[3] + 80.0]
+}
+
+/// Index of rust-explorer in PLUGINS.
+fn explorer_idx() -> Option<usize> {
+    PLUGINS.iter().position(|p| p.name == crate::selection::RUST_EXPLORER)
 }
 
 /// The EN / RU switch in the top right corner of the header.
@@ -279,7 +291,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         let short = desc.split(". ").next().unwrap_or(desc).trim_end_matches('.');
         ui.text(short, [nx, r[1] + 32.0, pb[0] - 10.0, r[3] - 10.0], 12.0, 400, DIM, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
 
-        if let Some((_, gb)) = gear.filter(|&(gi, _)| gi == i && installed) {
+        if let Some((_, gb)) = gear.filter(|&(gi, _)| gi == i) {
             let h = hot(ID_GEAR) && !busy;
             ui.round(gb, 8.0, if h { lerp(PANEL, TEXT, 0.08) } else { PANEL }, BORDER);
             ui.text_in("\u{E713}", gb, 14.0, 400, if busy { DIM } else { TEXT }, DT_CENTER | DT_VCENTER | DT_SINGLELINE, winrust_common::style::icon_face());
@@ -384,6 +396,16 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         ui.round(sw, 12.0, track, track);
         let kx = if hid { sw[2] - 12.0 } else { sw[0] + 12.0 };
         ui.round([kx - 8.0, sw[1] + 4.0, kx + 8.0, sw[3] - 4.0], 8.0, TEXT, TEXT);
+        let row2 = [row[0], row[1] + 80.0, row[2], row[3] + 80.0];
+        let on = explorer_idx().is_some_and(|e| SELECTED[e].load(Relaxed));
+        ui.round(row2, 10.0, PANEL, BORDER);
+        ui.text(t!("Оболочка: rust-explorer", "Shell: rust-explorer"), [row2[0] + 16.0, row2[1] + 10.0, row2[2] - 80.0, row2[1] + 32.0], 14.0, 600, TEXT, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
+        ui.text(t!("Включено: заменить Проводник. Выключено: остаётся стандартный Проводник Windows.", "On: replace Explorer. Off: the standard Windows Explorer stays."), [row2[0] + 16.0, row2[1] + 32.0, row2[2] - 80.0, row2[3] - 6.0], 12.0, 400, DIM, DT_LEFT | DT_WORDBREAK);
+        let sw2 = shell_switch_box(w);
+        let track2 = if on { ACCENT } else { off };
+        ui.round(sw2, 12.0, track2, track2);
+        let kx2 = if on { sw2[2] - 12.0 } else { sw2[0] + 12.0 };
+        ui.round([kx2 - 8.0, sw2[1] + 4.0, kx2 + 8.0, sw2[3] - 4.0], 8.0, TEXT, TEXT);
         button(&ui, closeb, t!("Закрыть", "Close"), 1, hot(ID_CANCEL));
     }
 
@@ -423,7 +445,7 @@ pub(crate) unsafe fn hit(hwnd: HWND, lp: isize) -> Option<usize> {
     let inside = |b: Box4| x >= b[0] * s && x <= b[2] * s && y >= b[1] * s && y <= b[3] * s;
     if SETTINGS.get().is_some() {
         let (_, _, closeb) = dialog_boxes(w);
-        return if inside(switch_box(w)) { Some(ID_SWITCH) } else if inside(closeb) { Some(ID_CANCEL) } else { None };
+        return if inside(switch_box(w)) { Some(ID_SWITCH) } else if inside(shell_switch_box(w)) { Some(ID_SHELL) } else if inside(closeb) { Some(ID_CANCEL) } else { None };
     }
     if DIALOG.with_borrow(|d| d.is_some()) {
         let (_, cancel, ok) = dialog_boxes(w);
@@ -432,7 +454,7 @@ pub(crate) unsafe fn hit(hwnd: HWND, lp: isize) -> Option<usize> {
     if BUSY.load(Relaxed) {
         return None;
     }
-    if gear_box(w).is_some_and(|(i, b)| INSTALLED[i].load(Relaxed) && inside(b)) {
+    if gear_box(w).is_some_and(|(_, b)| inside(b)) {
         return Some(ID_GEAR);
     }
     if let Some(i) = ready().enumerate().find_map(|(k, i)| inside(check_box(k, w).1).then_some(i)) {
@@ -518,6 +540,10 @@ pub(crate) unsafe fn click(hwnd: HWND, id: usize) {
         if id == ID_SWITCH {
             if let Err(e) = set_od_hidden(!od_hidden()) {
                 *MSG.lock().unwrap() = (tf!("Ошибка: {e}", "Error: {e}"), false);
+            }
+        } else if id == ID_SHELL {
+            if let Some(e) = explorer_idx() {
+                SELECTED[e].fetch_xor(true, Relaxed);
             }
         } else if id == ID_CANCEL {
             SETTINGS.set(None);
