@@ -28,3 +28,6 @@ ttf-parser = "0.25"
 ab_glyph_rasterizer = "0.1"
 woff2-patched = "0.4"
 
+
+[build-dependencies]
+embed-resource = "3"

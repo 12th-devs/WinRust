@@ -45,7 +45,9 @@ fn open_files() {
     use std::{path::PathBuf, process::{Command, Stdio}};
     let mine = std::env::var_os("LOCALAPPDATA").map(|b| PathBuf::from(b).join(r"plugin-launcher\bin\rust-explorer.exe"));
     let beside = std::env::current_exe().ok().map(|e| e.with_file_name("rust-explorer.exe"));
-    let exe = [mine, beside].into_iter().flatten().find(|p| p.exists()).unwrap_or_else(|| "explorer.exe".into());
+    let installed = std::env::var_os("ProgramFiles").map(|b| PathBuf::from(b).join(r"rust-explorer\rust-explorer.exe"));
+    // the newest copy wins: a stale one in the user's folder must not shadow the installed one (two bar buttons, old UI)
+    let exe = [installed, mine, beside].into_iter().flatten().filter_map(|p| Some((p.metadata().ok()?.modified().ok()?, p))).max().map(|(_, p)| p).unwrap_or_else(|| "explorer.exe".into());
     let _ = Command::new(exe).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
 }
 

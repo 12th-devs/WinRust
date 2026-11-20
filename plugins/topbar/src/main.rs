@@ -1011,6 +1011,13 @@ unsafe fn load_pins() {
         let icon = lnk_icon(&lnk, &target);
         PINS.with_borrow_mut(|p| p.push(Pin { lnk, target, icon }));
     }
+    // once: a File Explorer button for the installed file manager (the marker keeps an unpinned one gone)
+    let marker = appdata_file("topbar-explorer-pin.txt");
+    let rx = std::env::var_os("ProgramFiles").map(|pf| PathBuf::from(pf).join(r"rust-explorer\rust-explorer.exe"));
+    if let Some(rx) = rx.filter(|rx| rx.is_file() && !marker.exists()) {
+        pin_exe(&rx.to_string_lossy());
+        let _ = std::fs::write(marker, "1");
+    }
 }
 
 fn refresh_buttons() {

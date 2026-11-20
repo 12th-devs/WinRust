@@ -34,6 +34,7 @@ checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 name = "debloat"
 version = "0.1.0"
 dependencies = [
+ "embed-resource",
  "winrust-common",
 ]
 
@@ -175,6 +176,9 @@ dependencies = [
 [[package]]
 name = "purge"
 version = "0.1.0"
+dependencies = [
+ "embed-resource",
+]
 
 [[package]]
 name = "quote"
@@ -189,6 +193,7 @@ dependencies = [
 name = "reshell"
 version = "0.1.0"
 dependencies = [
+ "embed-resource",
  "windows-sys",
  "winrust-common",
 ]
@@ -197,6 +202,7 @@ dependencies = [
 name = "rs-du"
 version = "0.1.0"
 dependencies = [
+ "embed-resource",
  "windows-sys",
  "winrust-common",
 ]
@@ -205,6 +211,7 @@ dependencies = [
 name = "rs-shell"
 version = "0.1.0"
 dependencies = [
+ "embed-resource",
  "windows-sys",
  "winrust-common",
 ]
