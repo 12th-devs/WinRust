@@ -334,23 +334,55 @@ pub fn wifi() -> String {
     }
 }
 
-pub fn bluetooth() -> String {
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub struct RadioStates {
+    pub wifi: Option<bool>,
+    pub bluetooth: Option<bool>,
+}
+
+pub fn radio_states() -> RadioStates {
     use windows::Devices::Radios::{Radio, RadioKind, RadioState};
-    let result = (|| -> windows::core::Result<bool> {
+    let result = (|| -> windows::core::Result<RadioStates> {
         let radios = Radio::GetRadiosAsync()?.join()?;
+        let mut result = RadioStates::default();
         for radio in radios {
-            if radio.Kind()? == RadioKind::Bluetooth {
-                return Ok(radio.State()? == RadioState::On);
+            let value = match radio.State()? {
+                RadioState::On => Some(true),
+                RadioState::Off | RadioState::Disabled => Some(false),
+                _ => None,
+            };
+            match radio.Kind()? {
+                RadioKind::Bluetooth => result.bluetooth = value,
+                RadioKind::WiFi => result.wifi = value,
+                _ => {}
             }
         }
-        Ok(false)
+        Ok(result)
     })();
-    match result {
-        Ok(true) => "Bluetooth on",
-        Ok(false) => "Bluetooth off / unavailable",
-        Err(_) => "Bluetooth unavailable",
+    result.unwrap_or_default()
+}
+
+pub fn bluetooth_label(states: RadioStates) -> String {
+    match states.bluetooth {
+        Some(true) => "Bluetooth on",
+        Some(false) => "Bluetooth off",
+        None => "Bluetooth unavailable",
     }
     .into()
+}
+
+/// Query on the UI thread; unsupported Windows versions simply report no state.
+pub fn focus_active() -> Option<bool> {
+    use windows::{Foundation::Metadata::ApiInformation, UI::Shell::FocusSessionManager};
+    if !ApiInformation::IsTypePresent(&windows::core::HSTRING::from(
+        "Windows.UI.Shell.FocusSessionManager",
+    ))
+    .ok()?
+        || !FocusSessionManager::IsSupported().ok()?
+    {
+        return None;
+    }
+    FocusSessionManager::GetDefault().ok()?.IsFocusActive().ok()
 }
 
 pub fn volume(change: Option<i32>, mute: bool) -> Option<(i32, bool)> {

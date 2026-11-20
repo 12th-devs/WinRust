@@ -20,3 +20,9 @@ The test machine reported no active Windows media session and no supported DDC/C
 ## Mica and icon-only follow-up
 
 The Control Center now retains visible text only for Wi-Fi and Focus. Other tiles use centered icons; accessibility names, media metadata and native slider values remain available. A live desktop capture verified the revised layout. DWM diagnostics reported successful standard Mica (`type=2`) application/query for all fourteen tiles. Context menus continue to use Acrylic. The installer build, Clippy and all three module tests passed.
+
+## Lower borders, softer material and active backgrounds
+
+The bar reserves one physical pixel beneath its buttons for a lower hairline, and each tile paints a matching lower edge. A neutral premultiplied wash reduces wallpaper tint consistently across parent and child surfaces. The footer now reads Open Settings. Actual radio states drive Wi-Fi/Bluetooth accent backgrounds; guarded Focus-session detection and media playback state drive their corresponding active backgrounds. Continuous-value controls and action launchers do not invent an on/off state.
+
+A live capture verified the lower edges, text footer, and accent-colored Wi-Fi and Bluetooth tiles while the other tiles remained neutral. No radios or system settings were changed to create this proof. Focus activation and media playback transitions were not exercised. Module tests and Clippy passed.

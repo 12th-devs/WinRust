@@ -14,5 +14,7 @@ The user confirmed real Win32 application menus with window-action fallback for 
 
 Follow-up requirements: Windows-style Acrylic context menus, translucent-white borderless selection, regular-weight foreground app name, and a clock-triggered Control Center with separate native material surfaces for each tile. Control Center tiles use Mica and show labels only for Wi-Fi and Focus; other controls retain accessible names. Bar Mica/Acrylic preference remains independent of Acrylic context menus and Mica Control Center tiles.
 
+Latest requirements: subtle lower borders on the bar and all tiles, reduced wallpaper tint in Mica, an Open Settings text footer, and active tile backgrounds driven by actual system state. Include a fresh screenshot as visual proof of every visual change until the user says to stop.
+
 ## Success
 Responsive native top-edge surface with Mica, foreground application tracking, actionable menus, system information, keyboard access, DPI and monitor support, and reversible standalone installation.

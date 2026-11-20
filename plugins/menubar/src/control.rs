@@ -121,7 +121,7 @@ pub unsafe fn open(owner: HWND, anchor: RECT) {
         (Kind::Calculator, 106, 464, 94, 72),
         (Kind::Timer, 212, 464, 94, 72),
         (Kind::Capture, 318, 464, 94, 72),
-        (Kind::Settings, 186, 548, 40, 32),
+        (Kind::Settings, 124, 548, 164, 32),
     ];
     for (kind, x, y, width, height) in specs {
         let state = Box::new(Tile {
@@ -351,10 +351,10 @@ unsafe fn controls(hwnd: HWND) {
                     "\u{E722}",
                     Action::Keys(vec![VK_LWIN, VK_SHIFT, b'S' as u16]),
                 ),
-                _ => ("\u{E713}", Action::Uri("ms-settings:")),
+                _ => ("Open Settings", Action::Uri("ms-settings:")),
             };
             if kind == Kind::Settings {
-                add_button(hwnd, glyph, true, action, (2, 1, 36, 30));
+                add_button(hwnd, glyph, false, action, (2, 1, 160, 30));
             } else {
                 add_button(hwnd, glyph, true, action, (20, 14, 54, 44));
             }
@@ -426,9 +426,31 @@ unsafe fn paint(hwnd: HWND) {
 
 pub unsafe fn refresh() {
     let status = STATUS.with_borrow(Clone::clone);
+    let focus = crate::platform::focus_active();
     TILES.with_borrow(|tiles| {
         for &hwnd in tiles {
             let state = tile(hwnd);
+            let enabled = match state.kind {
+                Kind::Wifi => status.radios.wifi == Some(true),
+                Kind::Bluetooth => status.radios.bluetooth == Some(true),
+                Kind::Focus => focus == Some(true),
+                Kind::Media => status.media.playing,
+                _ => false,
+            };
+            let old_active = surface::active(hwnd);
+            if enabled {
+                SetPropW(hwnd, wide("WinRust.Active").as_ptr(), 1usize as HANDLE);
+            } else {
+                RemovePropW(hwnd, wide("WinRust.Active").as_ptr());
+            }
+            if old_active != enabled {
+                for button in &state.buttons {
+                    InvalidateRect(button.hwnd, null(), 0);
+                }
+                if !state.slider.is_null() {
+                    InvalidateRect(state.slider, null(), 0);
+                }
+            }
             let accessible = match state.kind {
                 Kind::Wifi => format!("Wi-Fi controls, {}", status.wifi),
                 Kind::Bluetooth => status.bluetooth.clone(),
@@ -447,9 +469,34 @@ pub unsafe fn refresh() {
                     .map_or("Sound unavailable".into(), |(v, muted)| {
                         format!("Sound, {v} percent{}", if muted { ", muted" } else { "" })
                     }),
+                Kind::Focus => match focus {
+                    Some(true) => "Focus, on",
+                    Some(false) => "Focus, off",
+                    None => "Focus, status unavailable",
+                }
+                .into(),
                 _ => title(state.kind).into(),
             };
             SetWindowTextW(hwnd, wide(&accessible).as_ptr());
+            if matches!(state.kind, Kind::Wifi | Kind::Bluetooth)
+                && let Some(button) = state.buttons.first()
+            {
+                let on = if state.kind == Kind::Wifi {
+                    status.radios.wifi
+                } else {
+                    status.radios.bluetooth
+                };
+                let accessible = format!(
+                    "Toggle {}, {}",
+                    title(state.kind),
+                    match on {
+                        Some(true) => "on",
+                        Some(false) => "off",
+                        None => "status unavailable",
+                    }
+                );
+                SetWindowTextW(button.hwnd, wide(&accessible).as_ptr());
+            }
             if state.kind == Kind::Media {
                 for (index, button) in state.buttons.iter_mut().enumerate() {
                     EnableWindow(button.hwnd, status.media.available as i32);

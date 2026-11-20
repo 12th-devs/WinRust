@@ -60,6 +60,7 @@ struct Status {
     volume: Option<(i32, bool)>,
     media: platform::Media,
     brightness: Option<(isize, i32)>,
+    radios: platform::RadioStates,
 }
 struct Update {
     snapshot: Snapshot,
@@ -227,6 +228,8 @@ fn start_worker() {
                 Ok(Work::Status) => {
                     status.volume = platform::volume(None, false);
                     status.wifi = platform::wifi();
+                    status.radios = platform::radio_states();
+                    status.bluetooth = platform::bluetooth_label(status.radios);
                 }
                 Ok(Work::Control(monitor)) => {
                     control_monitor = monitor;
@@ -240,9 +243,11 @@ fn start_worker() {
                 }
             }
             if last_status.elapsed() >= Duration::from_secs(30) {
+                let radios = platform::radio_states();
                 status = Status {
                     wifi: platform::wifi(),
-                    bluetooth: platform::bluetooth(),
+                    bluetooth: platform::bluetooth_label(radios),
+                    radios,
                     battery: platform::battery(),
                     volume: platform::volume(None, false),
                     media: if control_monitor != 0 {
@@ -591,7 +596,7 @@ unsafe fn layout(hwnd: HWND) {
     ));
     state.clock = clock;
     let width = state.rect.right - state.rect.left;
-    let height = sc(28, state.dpi);
+    let height = sc(28, state.dpi) - 1; // Leave the bar's physical lower hairline visible.
     let item_width = |item: &Trigger| {
         if item.icon {
             sc(32, state.dpi)
@@ -1821,6 +1826,10 @@ fn main() {
         }
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         BufferedPaintInit();
+        let winrt_initialized = windows::Win32::System::WinRT::RoInitialize(
+            windows::Win32::System::WinRT::RO_INIT_SINGLETHREADED,
+        )
+        .is_ok();
         InitCommonControlsEx(&INITCOMMONCONTROLSEX {
             dwSize: size_of::<INITCOMMONCONTROLSEX>() as u32,
             dwICC: ICC_BAR_CLASSES,
@@ -1881,6 +1890,9 @@ fn main() {
         }
         SENDER.with_borrow_mut(|sender| *sender = None);
         BufferedPaintUnInit();
+        if winrt_initialized {
+            windows::Win32::System::WinRT::RoUninitialize();
+        }
         if !mutex.is_null() {
             CloseHandle(mutex);
         }

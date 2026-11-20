@@ -37,14 +37,23 @@ pub unsafe fn apply(hwnd: HWND, rounded: bool) {
     } else {
         2
     };
-    apply_material(hwnd, rounded, material);
+    apply_material(hwnd, rounded, material, if rounded { 0 } else { 1 });
 }
 
 pub unsafe fn apply_control(hwnd: HWND) {
-    apply_material(hwnd, true, 2); // Control Center tiles always use standard Mica.
+    apply_material(hwnd, true, 2, 2); // Control Center tiles always use standard Mica.
 }
 
-unsafe fn apply_material(hwnd: HWND, rounded: bool, material: i32) {
+unsafe fn apply_material(hwnd: HWND, rounded: bool, material: i32, shell_kind: usize) {
+    if shell_kind == 0 {
+        RemovePropW(hwnd, wide("WinRust.ShellKind").as_ptr());
+    } else {
+        SetPropW(
+            hwnd,
+            wide("WinRust.ShellKind").as_ptr(),
+            shell_kind as HANDLE,
+        );
+    }
     let dark = dark() as i32;
     DwmSetWindowAttribute(
         hwnd,
@@ -181,7 +190,11 @@ pub unsafe fn paint_background(hwnd: HWND) {
     // Black on a glass-extended HWND is transparent to the system backdrop.
     let contrast = high_contrast();
     let brush = if contrast {
-        GetSysColorBrush(COLOR_WINDOW)
+        GetSysColorBrush(if active(hwnd) {
+            COLOR_HIGHLIGHT
+        } else {
+            COLOR_WINDOW
+        })
     } else if GetPropW(hwnd, wide("WinRust.Mica").as_ptr()) as usize == 2 {
         CreateSolidBrush(if dark() { 0x00202020 } else { 0x00f3f3f3 })
     } else {
@@ -191,7 +204,115 @@ pub unsafe fn paint_background(hwnd: HWND) {
     if !contrast && GetPropW(hwnd, wide("WinRust.Mica").as_ptr()) as usize == 2 {
         DeleteObject(brush);
     }
+    if !contrast && shell_kind(hwnd) != 0 {
+        let mut rect = zeroed();
+        GetClientRect(hwnd, &mut rect);
+        let mut buffered_dc = null_mut();
+        let params = BP_PAINTPARAMS {
+            cbSize: size_of::<BP_PAINTPARAMS>() as u32,
+            dwFlags: BPPF_ERASE,
+            prcExclude: null(),
+            pBlendFunction: null(),
+        };
+        let buffer = BeginBufferedPaint(dc, &rect, BPBF_TOPDOWNDIB, &params, &mut buffered_dc);
+        if buffer != 0 {
+            BufferedPaintClear(buffer, &rect);
+            shell_fill(buffer, &rect, hwnd, true);
+            EndBufferedPaint(buffer, 1);
+        }
+    }
     EndPaint(hwnd, &paint);
+}
+
+unsafe fn shell_kind(hwnd: HWND) -> usize {
+    GetPropW(
+        GetAncestor(hwnd, GA_ROOT),
+        wide("WinRust.ShellKind").as_ptr(),
+    ) as usize
+}
+pub unsafe fn active(hwnd: HWND) -> bool {
+    !GetPropW(GetAncestor(hwnd, GA_ROOT), wide("WinRust.Active").as_ptr()).is_null()
+}
+
+unsafe fn accent() -> (u8, u8, u8) {
+    let mut color = 0xff0078d4u32;
+    let mut opaque = 0;
+    DwmGetColorizationColor(&mut color, &mut opaque);
+    ((color >> 16) as u8, (color >> 8) as u8, color as u8)
+}
+
+unsafe fn active_text() -> u32 {
+    let (r, g, b) = accent();
+    let linear = |v: u8| {
+        let v = v as f32 / 255.;
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    if 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b) > 0.179 {
+        0x00191919
+    } else {
+        0x00ffffff
+    }
+}
+
+/// A subtle neutral scrim reduces wallpaper tint while DWM still draws Mica.
+/// Child controls receive the same premultiplied fill so they never cut holes in it.
+unsafe fn shell_fill(buffer: isize, rect: &RECT, hwnd: HWND, border: bool) {
+    let kind = shell_kind(hwnd);
+    if kind == 0 {
+        return;
+    }
+    let enabled = active(hwnd);
+    let (r, g, b, alpha) = if enabled {
+        let (r, g, b) = accent();
+        (r, g, b, 214u8)
+    } else {
+        let neutral = if dark() { 32 } else { 243 };
+        (neutral, neutral, neutral, 76u8)
+    };
+    let mut bits = null_mut();
+    let mut stride = 0;
+    if GetBufferedPaintBits(buffer, &mut bits, &mut stride) < 0 || bits.is_null() {
+        return;
+    }
+    let premultiply = |value: u8| (value as u16 * alpha as u16 / 255) as u8;
+    let fill = RGBQUAD {
+        rgbRed: premultiply(r),
+        rgbGreen: premultiply(g),
+        rgbBlue: premultiply(b),
+        rgbReserved: alpha,
+    };
+    let width = rect.right - rect.left;
+    let height = rect.bottom - rect.top;
+    for y in 0..height {
+        for x in 0..width {
+            *bits.offset((y * stride + x) as isize) = fill;
+        }
+    }
+    if border && height > 0 {
+        let inset = if kind == 2 {
+            8 * windows_sys::Win32::UI::HiDpi::GetDpiForWindow(hwnd).max(96) as i32 / 96
+        } else {
+            0
+        };
+        for x in inset..width - inset {
+            let pixel = &mut *bits.offset(((height - 1) * stride + x) as isize);
+            blend(pixel, if dark() { 255 } else { 0 }, 52);
+        }
+    }
+}
+
+fn blend(pixel: &mut RGBQUAD, color: u8, alpha: u8) {
+    let mix =
+        |old: u8| ((color as u16 * alpha as u16 + old as u16 * (255 - alpha as u16)) / 255) as u8;
+    pixel.rgbRed = mix(pixel.rgbRed);
+    pixel.rgbGreen = mix(pixel.rgbGreen);
+    pixel.rgbBlue = mix(pixel.rgbBlue);
+    pixel.rgbReserved =
+        (alpha as u16 + pixel.rgbReserved as u16 * (255 - alpha as u16) / 255) as u8;
 }
 
 pub unsafe fn draw_button(
@@ -215,55 +336,55 @@ pub unsafe fn draw_button(
         return;
     }
     BufferedPaintClear(buffer, &rect);
+    shell_fill(buffer, &rect, draw.hwndItem, false);
     let disabled = draw.itemState & ODS_DISABLED != 0;
     let contrast = high_contrast();
     if contrast {
-        FillRect(dc, &rect, GetSysColorBrush(COLOR_WINDOW));
+        FillRect(
+            dc,
+            &rect,
+            GetSysColorBrush(if active(draw.hwndItem) {
+                COLOR_HIGHLIGHT
+            } else {
+                COLOR_WINDOW
+            }),
+        );
         BufferedPaintSetAlpha(buffer, &rect, 255);
     }
     let hover = selected
         || draw.itemState & ODS_SELECTED != 0
         || (!is_menu && draw.itemState & ODS_FOCUS != 0);
     if hover && !disabled {
-        let color = if contrast {
-            GetSysColor(COLOR_HIGHLIGHT)
-        } else {
-            0x00ffffff
-        };
-        let brush = CreateSolidBrush(color);
-        let old = SelectObject(dc, brush);
-        let pen = SelectObject(dc, GetStockObject(NULL_PEN));
-        RoundRect(
-            dc,
-            rect.left + 2,
-            rect.top + 2,
-            rect.right - 2,
-            rect.bottom - 2,
-            8,
-            8,
-        );
-        SelectObject(dc, pen);
-        SelectObject(dc, old);
-        DeleteObject(brush);
         if contrast {
+            let brush = CreateSolidBrush(GetSysColor(COLOR_HIGHLIGHT));
+            let old = SelectObject(dc, brush);
+            let pen = SelectObject(dc, GetStockObject(NULL_PEN));
+            RoundRect(
+                dc,
+                rect.left + 2,
+                rect.top + 2,
+                rect.right - 2,
+                rect.bottom - 2,
+                8,
+                8,
+            );
+            SelectObject(dc, pen);
+            SelectObject(dc, old);
+            DeleteObject(brush);
             BufferedPaintSetAlpha(buffer, &rect, 255);
         } else {
-            // Premultiply the rounded mask so the white highlight remains translucent.
-            // Setting only alpha on GDI's full-white RGB would produce an opaque halo.
             let mut bits = null_mut();
             let mut stride = 0;
             if GetBufferedPaintBits(buffer, &mut bits, &mut stride) >= 0 && !bits.is_null() {
                 let alpha = if dark() { 26 } else { 120 };
-                for y in 0..(rect.bottom - rect.top) {
-                    for x in 0..(rect.right - rect.left) {
-                        let pixel = &mut *bits.offset((y * stride + x) as isize);
-                        if pixel.rgbRed != 0 || pixel.rgbGreen != 0 || pixel.rgbBlue != 0 {
-                            *pixel = RGBQUAD {
-                                rgbRed: alpha,
-                                rgbGreen: alpha,
-                                rgbBlue: alpha,
-                                rgbReserved: alpha,
-                            };
+                let width = rect.right - rect.left;
+                let height = rect.bottom - rect.top;
+                for y in 2..height - 2 {
+                    for x in 2..width - 2 {
+                        let cx = x.clamp(6, (width - 7).max(6));
+                        let cy = y.clamp(6, (height - 7).max(6));
+                        if (x - cx) * (x - cx) + (y - cy) * (y - cy) <= 16 {
+                            blend(&mut *bits.offset((y * stride + x) as isize), 255, alpha);
                         }
                     }
                 }
@@ -286,7 +407,9 @@ pub unsafe fn draw_button(
         let brush = CreateSolidBrush(color);
         let cx = (rect.left + rect.right) / 2;
         let cy = (rect.top + rect.bottom) / 2;
-        let unit = ((rect.bottom - rect.top) * 4 / 28).max(3);
+        let unit =
+            (4 * windows_sys::Win32::UI::HiDpi::GetDpiForWindow(draw.hwndItem).max(96) as i32 / 96)
+                .max(3);
         for (x, y) in [
             (-unit - 1, -unit - 1),
             (1, -unit - 1),
@@ -314,13 +437,15 @@ pub unsafe fn draw_button(
     options.crText = if contrast {
         GetSysColor(if disabled {
             COLOR_GRAYTEXT
-        } else if hover {
+        } else if hover || active(draw.hwndItem) {
             COLOR_HIGHLIGHTTEXT
         } else {
             COLOR_WINDOWTEXT
         })
     } else if disabled {
         if dark() { 0x00999999 } else { 0x00666666 }
+    } else if active(draw.hwndItem) {
+        active_text()
     } else if dark() {
         0x00f5f5f5
     } else {
@@ -437,6 +562,10 @@ pub unsafe fn paint_slider(hwnd: HWND) {
     let mut rect = zeroed();
     GetClientRect(hwnd, &mut rect);
     let draw = NMCUSTOMDRAW {
+        hdr: NMHDR {
+            hwndFrom: hwnd,
+            ..zeroed()
+        },
         hdc: dc,
         rc: rect,
         ..zeroed()
@@ -463,6 +592,7 @@ unsafe fn draw_slider(draw: &NMCUSTOMDRAW, level: i32, enabled: bool) {
         return;
     }
     BufferedPaintClear(buffer, &rect);
+    shell_fill(buffer, &rect, draw.hdr.hwndFrom, false);
     let scale = ((rect.bottom - rect.top) / 30).max(1);
     let y = (rect.top + rect.bottom) / 2;
     let left = rect.left + 9 * scale;
@@ -508,7 +638,9 @@ unsafe fn draw_slider(draw: &NMCUSTOMDRAW, level: i32, enabled: bool) {
         for y in 0..rect.bottom - rect.top {
             for x in 0..rect.right - rect.left {
                 let pixel = &mut *bits.offset((y * stride + x) as isize);
-                pixel.rgbReserved = pixel.rgbRed;
+                if pixel.rgbReserved == 0 {
+                    pixel.rgbReserved = pixel.rgbRed;
+                }
             }
         }
     }
