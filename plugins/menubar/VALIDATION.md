@@ -16,3 +16,7 @@ The implementation's platform boundaries and remaining specification gaps are li
 Clippy and the three module tests pass after the follow-up. Live desktop clicks verified that the time button opens separate Acrylic tile windows and opening the Windows menu dismisses those tiles. The Windows menu's icon gutter, shortcut/chevron layout, borderless white selection, and regular-weight app name were visually inspected. Native slider input/accessibility remains intact while custom painting removes the initially observed opaque slider backgrounds. The final slider artwork was inspected in the running panel.
 
 The test machine reported no active Windows media session and no supported DDC/CI brightness for the selected display; the UI showed those unavailable states and disabled the corresponding controls. Actual radio changes, audio changes, DDC/CI writes, media transport, and the complete keyboard flow were not exercised on the user's hardware. These checks remain manual.
+
+## Mica and icon-only follow-up
+
+The Control Center now retains visible text only for Wi-Fi and Focus. Other tiles use centered icons; accessibility names, media metadata and native slider values remain available. A live desktop capture verified the revised layout. DWM diagnostics reported successful standard Mica (`type=2`) application/query for all fourteen tiles. Context menus continue to use Acrylic. The installer build, Clippy and all three module tests passed.

@@ -31,6 +31,20 @@ pub fn high_contrast() -> bool {
     }
 }
 pub unsafe fn apply(hwnd: HWND, rounded: bool) {
+    // Context menus remain Acrylic; the bar follows its configured material.
+    let material = if rounded || crate::CONFIG.with_borrow(|c| c.acrylic) {
+        3
+    } else {
+        2
+    };
+    apply_material(hwnd, rounded, material);
+}
+
+pub unsafe fn apply_control(hwnd: HWND) {
+    apply_material(hwnd, true, 2); // Control Center tiles always use standard Mica.
+}
+
+unsafe fn apply_material(hwnd: HWND, rounded: bool, material: i32) {
     let dark = dark() as i32;
     DwmSetWindowAttribute(
         hwnd,
@@ -38,12 +52,6 @@ pub unsafe fn apply(hwnd: HWND, rounded: bool) {
         (&dark as *const i32).cast(),
         4,
     );
-    // Context menus always use native Desktop Acrylic, independently of the bar.
-    let material: i32 = if rounded || crate::CONFIG.with_borrow(|c| c.acrylic) {
-        3
-    } else {
-        2
-    }; // Desktop Acrylic / standard Mica.
     let result = DwmSetWindowAttribute(
         hwnd,
         DWMWA_SYSTEMBACKDROP_TYPE as u32,

@@ -121,7 +121,7 @@ pub unsafe fn open(owner: HWND, anchor: RECT) {
         (Kind::Calculator, 106, 464, 94, 72),
         (Kind::Timer, 212, 464, 94, 72),
         (Kind::Capture, 318, 464, 94, 72),
-        (Kind::Settings, 124, 548, 164, 32),
+        (Kind::Settings, 186, 548, 40, 32),
     ];
     for (kind, x, y, width, height) in specs {
         let state = Box::new(Tile {
@@ -155,7 +155,7 @@ pub unsafe fn open(owner: HWND, anchor: RECT) {
             continue;
         }
         TILES.with_borrow_mut(|tiles| tiles.push(hwnd));
-        surface::apply(hwnd, true);
+        surface::apply_control(hwnd);
         controls(hwnd);
     }
     TILES.with_borrow(|tiles| {
@@ -249,7 +249,7 @@ unsafe fn slider(hwnd: HWND, x: i32, width: i32, name: &str) {
         wide(name).as_ptr(),
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | TBS_NOTICKS,
         sc(x, state.dpi),
-        sc(43, state.dpi),
+        sc(28, state.dpi),
         sc(width, state.dpi),
         sc(30, state.dpi),
         hwnd,
@@ -286,14 +286,14 @@ unsafe fn controls(hwnd: HWND) {
             "\u{E702}",
             true,
             Action::Radio("bluetooth"),
-            (20, 5, 54, 44),
+            (20, 18, 54, 44),
         ),
         Kind::Cast => add_button(
             hwnd,
             "\u{EC15}",
             true,
             Action::Keys(vec![VK_LWIN, b'K' as u16]),
-            (20, 5, 54, 44),
+            (20, 18, 54, 44),
         ),
         Kind::Media => {
             add_button(hwnd, "\u{E892}", true, Action::Media(0), (12, 119, 52, 40));
@@ -312,35 +312,35 @@ unsafe fn controls(hwnd: HWND) {
             "\u{E7F4}",
             true,
             Action::Uri("ms-settings:display"),
-            (20, 3, 54, 42),
+            (20, 14, 54, 44),
         ),
         Kind::Project => add_button(
             hwnd,
             "\u{EBC6}",
             true,
             Action::Keys(vec![VK_LWIN, b'P' as u16]),
-            (20, 3, 54, 42),
+            (20, 14, 54, 44),
         ),
         Kind::Brightness => {
             add_button(
                 hwnd,
-                "\u{E713}",
+                "\u{E706}",
                 true,
                 Action::Uri("ms-settings:display"),
-                (366, 5, 32, 32),
+                (8, 26, 34, 34),
             );
-            slider(hwnd, 16, 380, "Display brightness");
+            slider(hwnd, 48, 348, "Display brightness");
         }
         Kind::Sound => {
-            add_button(hwnd, "\u{E767}", true, Action::Mute, (8, 40, 34, 34));
+            add_button(hwnd, "\u{E767}", true, Action::Mute, (8, 26, 34, 34));
             add_button(
                 hwnd,
                 "\u{E713}",
                 true,
                 Action::Uri("ms-settings:sound"),
-                (366, 5, 32, 32),
+                (366, 26, 32, 34),
             );
-            slider(hwnd, 48, 348, "Output volume");
+            slider(hwnd, 48, 306, "Output volume");
         }
         kind => {
             let (glyph, action) = match kind {
@@ -351,12 +351,12 @@ unsafe fn controls(hwnd: HWND) {
                     "\u{E722}",
                     Action::Keys(vec![VK_LWIN, VK_SHIFT, b'S' as u16]),
                 ),
-                _ => ("System Settings", Action::Uri("ms-settings:")),
+                _ => ("\u{E713}", Action::Uri("ms-settings:")),
             };
             if kind == Kind::Settings {
-                add_button(hwnd, glyph, false, action, (2, 1, 160, 30));
+                add_button(hwnd, glyph, true, action, (2, 1, 36, 30));
             } else {
-                add_button(hwnd, glyph, true, action, (20, 3, 54, 42));
+                add_button(hwnd, glyph, true, action, (20, 14, 54, 44));
             }
         }
     }
@@ -397,56 +397,29 @@ unsafe fn paint(hwnd: HWND) {
             );
         }
         Kind::Media => {
-            label(hwnd, dc, "Now Playing", (16, 12, 168, 24), false);
-            label(
-                hwnd,
-                dc,
-                if status.media.available {
-                    &status.media.title
+            let draw = DRAWITEMSTRUCT {
+                CtlType: ODT_BUTTON,
+                hwndItem: hwnd,
+                hDC: dc,
+                itemState: if status.media.available {
+                    0
                 } else {
-                    "No active media"
+                    ODS_DISABLED
                 },
-                (16, 48, 168, 26),
-                false,
-            );
-            label(hwnd, dc, &status.media.artist, (16, 78, 168, 22), true);
+                rcItem: RECT {
+                    left: sc(16, state.dpi),
+                    top: sc(16, state.dpi),
+                    right: sc(184, state.dpi),
+                    bottom: sc(104, state.dpi),
+                },
+                ..zeroed()
+            };
+            surface::draw_button(&draw, "\u{E8D6}", state.fonts[2], false, None);
         }
         Kind::Focus => {
-            label(hwnd, dc, "Focus", (62, 12, 120, 24), false);
-            label(hwnd, dc, "Open settings", (62, 36, 120, 20), true);
+            label(hwnd, dc, "Focus", (62, 24, 120, 24), false);
         }
-        Kind::Bluetooth => {
-            label(hwnd, dc, "Bluetooth", (8, 43, 80, 18), true);
-            label(
-                hwnd,
-                dc,
-                status
-                    .bluetooth
-                    .strip_prefix("Bluetooth ")
-                    .unwrap_or("Checking…"),
-                (8, 61, 80, 17),
-                true,
-            );
-        }
-        Kind::Brightness => {
-            let text = status
-                .brightness
-                .filter(|(m, _)| *m == state.monitor)
-                .map_or("Display · settings only".into(), |(_, v)| {
-                    format!("Display · {v}%")
-                });
-            label(hwnd, dc, &text, (16, 8, 340, 27), false);
-        }
-        Kind::Sound => {
-            let text = status
-                .volume
-                .map_or("Sound unavailable".into(), |(v, muted)| {
-                    format!("Sound · {v}%{}", if muted { " · muted" } else { "" })
-                });
-            label(hwnd, dc, &text, (16, 8, 340, 27), false);
-        }
-        Kind::Settings => {}
-        _ => label(hwnd, dc, title(state.kind), (8, 48, 80, 22), true),
+        _ => {}
     }
     ReleaseDC(hwnd, dc);
 }
@@ -700,7 +673,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             0
         }
         WM_SETTINGCHANGE | WM_THEMECHANGED => {
-            surface::apply(hwnd, true);
+            surface::apply_control(hwnd);
             InvalidateRect(hwnd, null(), 0);
             0
         }
