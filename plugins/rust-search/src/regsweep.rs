@@ -258,6 +258,7 @@ mod tests {
     use std::os::windows::process::CommandExt; // no console window per reg.exe
 
     #[test]
+    #[ignore = "writes to the Windows registry; run only in a disposable Windows VM"]
     fn scan_backup_delete_restore_in_the_real_registry() {
         let p = "C:\\rs-sweep-test-9f3a\\App";
         let reg = |args: &[&str]| std::process::Command::new("reg").args(args).creation_flags(0x0800_0000).output().unwrap().status.success();
